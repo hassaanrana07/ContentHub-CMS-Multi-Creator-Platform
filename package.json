@@ -1,0 +1,12 @@
+{
+  "name": "contenthub-cms",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ContentHub CMS — Multi-Creator Content Management System",
+  "scripts": {
+    "server": "npm run start --prefix server",
+    "client": "npm run dev --prefix client",
+    "db:seed": "node server/db/seed.js",
+    "build": "npm run build --prefix client"
+  }
+}
