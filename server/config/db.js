@@ -3,11 +3,13 @@ require('dotenv').config();
 
 const connectionString = process.env.DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/contenthub_db';
 
+const isProduction = process.env.NODE_ENV === 'production';
+const isRemoteDb = connectionString && !connectionString.includes('localhost') && !connectionString.includes('127.0.0.1');
+const enableSsl = process.env.DB_SSL === 'true' || (isProduction && isRemoteDb) || (connectionString && connectionString.includes('amazonaws.com'));
+
 const pool = new Pool({
   connectionString,
-  ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('amazonaws.com')
-    ? { rejectUnauthorized: false }
-    : false,
+  ssl: enableSsl ? { rejectUnauthorized: false } : false,
 });
 
 pool.on('error', (err) => {
