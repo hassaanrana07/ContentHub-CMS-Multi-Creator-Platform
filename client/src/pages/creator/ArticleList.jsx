@@ -202,7 +202,7 @@ export const ArticleList = () => {
               <tbody className="divide-y divide-warm-border">
                 {filteredPosts.map((post) => {
                   const isPublished = post.status === 'PUBLISHED';
-                  const publicArticleUrl = `/site/${creator?.username}/articles/${post.slug}`;
+                  const publicArticleUrl = `/${creator?.username}/articles/${post.slug}`;
                   return (
                     <tr key={post.id} className="hover:bg-warm-hover/50 transition-colors">
                       <td className="px-6 py-4">
@@ -210,7 +210,7 @@ export const ArticleList = () => {
                           <p className="font-serif font-bold text-warm-charcoal hover:text-warm-terracotta transition-colors">
                             {post.title}
                           </p>
-                          <p className="text-xs font-mono text-warm-muted truncate">/site/{creator?.username}/articles/{post.slug}</p>
+                          <p className="text-xs font-mono text-warm-muted truncate">/{creator?.username}/articles/{post.slug}</p>
                         </div>
                       </td>
                       <td className="px-6 py-4">

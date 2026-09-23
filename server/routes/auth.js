@@ -3,7 +3,7 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('../config/db');
-const { authenticateToken, JWT_SECRET } = require('../middleware/auth');
+const { authenticateToken, JWT_SECRET, revokeToken } = require('../middleware/auth');
 
 const RESERVED_USERNAMES = [
   'admin', 'login', 'register', 'api', 'dashboard', 'settings',
@@ -19,16 +19,45 @@ router.post('/register', async (req, res) => {
     return res.status(400).json({ error: 'All fields are required.' });
   }
 
+  // Field length limits corresponding to database column sizes
+  if (typeof name !== 'string' || name.trim().length > 255) {
+    return res.status(400).json({ error: 'Name must not exceed 255 characters.' });
+  }
+
+  const cleanUsername = String(username).trim().toLowerCase();
+  if (cleanUsername.length > 100) {
+    return res.status(400).json({ error: 'Username must not exceed 100 characters.' });
+  }
+
+  const cleanEmail = String(email).trim().toLowerCase();
+  if (cleanEmail.length > 255) {
+    return res.status(400).json({ error: 'Email must not exceed 255 characters.' });
+  }
+
+  // RFC-compatible email format validation
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  if (!emailRegex.test(cleanEmail)) {
+    return res.status(400).json({ error: 'Please provide a valid email address.' });
+  }
+
   if (password !== confirmPassword) {
     return res.status(400).json({ error: 'Passwords do not match.' });
   }
 
-  if (password.length < 6) {
-    return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+  // Password strength policy: minimum 8 characters, maximum 128 characters, with complexity requirements
+  if (password.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters long.' });
+  }
+  if (password.length > 128) {
+    return res.status(400).json({ error: 'Password must not exceed 128 characters.' });
   }
 
-  const cleanUsername = username.trim().toLowerCase();
-  const cleanEmail = email.trim().toLowerCase();
+  const passwordComplexityRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]).{8,}$/;
+  if (!passwordComplexityRegex.test(password)) {
+    return res.status(400).json({
+      error: 'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character.'
+    });
+  }
 
   const usernameRegex = /^[a-z0-9_-]+$/;
   if (!usernameRegex.test(cleanUsername)) {
@@ -169,11 +198,32 @@ router.post('/register', async (req, res) => {
 
 // Login User (Supports Email OR Username)
 router.post('/login', async (req, res) => {
-  const identifier = (req.body.identifier || req.body.email || req.body.username || '').trim().toLowerCase();
-  const password = req.body.password;
+  if (!req.body || typeof req.body !== 'object') {
+    return res.status(400).json({ error: 'Username or Email and password are required.' });
+  }
+
+  const rawIdentifier = req.body.identifier !== undefined
+    ? req.body.identifier
+    : (req.body.email !== undefined ? req.body.email : req.body.username);
+  const rawPassword = req.body.password;
+
+  if (rawIdentifier === undefined || rawIdentifier === null || rawPassword === undefined || rawPassword === null) {
+    return res.status(400).json({ error: 'Username or Email and password are required.' });
+  }
+
+  if (typeof rawIdentifier !== 'string' || typeof rawPassword !== 'string') {
+    return res.status(400).json({ error: 'Username or Email and password must be valid strings.' });
+  }
+
+  const identifier = rawIdentifier.trim().toLowerCase();
+  const password = rawPassword;
 
   if (!identifier || !password) {
     return res.status(400).json({ error: 'Username or Email and password are required.' });
+  }
+
+  if (identifier.length > 255 || password.length > 128) {
+    return res.status(400).json({ error: 'Username or password exceeds maximum allowed length.' });
   }
 
   try {
@@ -233,6 +283,16 @@ router.get('/me', authenticateToken, async (req, res) => {
     user: req.user,
     creator: req.creator || null
   });
+});
+
+// Server-Side Logout (Revokes active JWT session token)
+router.post('/logout', authenticateToken, async (req, res) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (token) {
+    revokeToken(token);
+  }
+  return res.json({ message: 'Logged out successfully. Session revoked.' });
 });
 
 module.exports = router;

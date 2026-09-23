@@ -15,6 +15,15 @@ router.use((req, res, next) => {
   next();
 });
 
+// Validate route :id parameter format to prevent SQL syntax/type errors (22P02, 22003)
+router.param('id', (req, res, next, id) => {
+  const numId = Number(id);
+  if (!/^\d+$/.test(id) || !Number.isInteger(numId) || numId < 1 || numId > 2147483647) {
+    return res.status(400).json({ error: 'Invalid identifier format. Resource ID must be a positive integer.' });
+  }
+  next();
+});
+
 function slugify(text) {
   return text
     .toString()
@@ -27,18 +36,58 @@ function slugify(text) {
     .replace(/-+$/, '');
 }
 
+function validateInt(val, fieldName, min = 0, max = 2147483647) {
+  if (val === undefined || val === null || val === '') return { value: undefined };
+  const num = typeof val === 'number'
+    ? val
+    : (typeof val === 'string' && /^-?\d+$/.test(val.trim()) ? Number(val.trim()) : NaN);
+  if (!Number.isInteger(num) || num < min || num > max) {
+    return { error: `${fieldName} must be an integer between ${min} and ${max}.` };
+  }
+  return { value: num };
+}
+
+function validateString(val, fieldName, maxLength, required = false) {
+  if (val === undefined || val === null) {
+    if (required) return { error: `${fieldName} is required.` };
+    return { value: undefined };
+  }
+  if (typeof val !== 'string') {
+    return { error: `${fieldName} must be a string.` };
+  }
+  const trimmed = val.trim();
+  if (required && trimmed.length === 0) {
+    return { error: `${fieldName} cannot be empty.` };
+  }
+  if (trimmed.length > maxLength) {
+    return { error: `${fieldName} must be ${maxLength} characters or fewer.` };
+  }
+  return { value: trimmed };
+}
+
 // 1. CREATOR OVERVIEW & STATS
 router.get('/dashboard/stats', async (req, res) => {
   const creatorId = req.creator.id;
   try {
-    const publishedRes = await db.query(`SELECT COUNT(*) FROM posts WHERE creator_id = $1 AND status = 'PUBLISHED'`, [creatorId]);
-    const draftRes = await db.query(`SELECT COUNT(*) FROM posts WHERE creator_id = $1 AND status = 'DRAFT'`, [creatorId]);
-    const sectionsRes = await db.query(`SELECT COUNT(*) FROM homepage_sections WHERE creator_id = $1`, [creatorId]);
-    const capabilitiesRes = await db.query(`SELECT COUNT(*) FROM capabilities WHERE creator_id = $1`, [creatorId]);
-    const testimonialsRes = await db.query(`SELECT COUNT(*) FROM testimonials WHERE creator_id = $1`, [creatorId]);
-    const faqsRes = await db.query(`SELECT COUNT(*) FROM faqs WHERE creator_id = $1`, [creatorId]);
-    const unreadMessagesRes = await db.query(`SELECT COUNT(*) FROM contact_messages WHERE creator_id = $1 AND is_read = false`, [creatorId]);
-    const mediaRes = await db.query(`SELECT COUNT(*) FROM media WHERE creator_id = $1`, [creatorId]);
+    const [
+      publishedRes,
+      draftRes,
+      sectionsRes,
+      capabilitiesRes,
+      testimonialsRes,
+      faqsRes,
+      unreadMessagesRes,
+      mediaRes
+    ] = await Promise.all([
+      db.query(`SELECT COUNT(*) FROM posts WHERE creator_id = $1 AND status = 'PUBLISHED'`, [creatorId]),
+      db.query(`SELECT COUNT(*) FROM posts WHERE creator_id = $1 AND status = 'DRAFT'`, [creatorId]),
+      db.query(`SELECT COUNT(*) FROM homepage_sections WHERE creator_id = $1`, [creatorId]),
+      db.query(`SELECT COUNT(*) FROM capabilities WHERE creator_id = $1`, [creatorId]),
+      db.query(`SELECT COUNT(*) FROM testimonials WHERE creator_id = $1`, [creatorId]),
+      db.query(`SELECT COUNT(*) FROM faqs WHERE creator_id = $1`, [creatorId]),
+      db.query(`SELECT COUNT(*) FROM contact_messages WHERE creator_id = $1 AND is_read = false`, [creatorId]),
+      db.query(`SELECT COUNT(*) FROM media WHERE creator_id = $1`, [creatorId])
+    ]);
 
     return res.json({
       stats: {
@@ -74,6 +123,21 @@ router.put('/profile', async (req, res) => {
   const { display_name, bio, profile_image, name } = req.body;
   const creatorId = req.creator.id;
 
+  if (name !== undefined && name !== null) {
+    const vName = validateString(name, 'Name', 255, true);
+    if (vName.error) return res.status(400).json({ error: vName.error });
+  }
+  if (display_name !== undefined && display_name !== null) {
+    const vDisplay = validateString(display_name, 'Display name', 255, false);
+    if (vDisplay.error) return res.status(400).json({ error: vDisplay.error });
+  }
+  if (bio !== undefined && bio !== null && typeof bio !== 'string') {
+    return res.status(400).json({ error: 'Bio must be a string.' });
+  }
+  if (profile_image !== undefined && profile_image !== null && typeof profile_image !== 'string') {
+    return res.status(400).json({ error: 'Profile image must be a string.' });
+  }
+
   try {
     if (name) {
       await db.query(`UPDATE users SET name = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [name.trim(), req.user.id]);
@@ -86,7 +150,7 @@ router.put('/profile', async (req, res) => {
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $4
        RETURNING *`,
-      [display_name, bio, profile_image, creatorId]
+      [display_name !== undefined ? (typeof display_name === 'string' ? display_name.trim() : display_name) : null, bio, profile_image, creatorId]
     );
     return res.json({ message: 'Profile updated successfully!', profile: updateRes.rows[0] });
   } catch (err) {
@@ -121,6 +185,32 @@ router.put('/website-settings', async (req, res) => {
     base_font_size,
     heading_scale
   } = req.body;
+
+  if (site_title !== undefined && site_title !== null) {
+    const v = validateString(site_title, 'Site title', 255, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+  }
+
+  const colorFields = { primary_color, secondary_color, accent_color, bg_color, surface_color, text_color, muted_color };
+  for (const [key, val] of Object.entries(colorFields)) {
+    if (val !== undefined && val !== null) {
+      const v = validateString(val, key, 50, false);
+      if (v.error) return res.status(400).json({ error: v.error });
+    }
+  }
+
+  if (font_family !== undefined && font_family !== null) {
+    const v = validateString(font_family, 'Font family', 100, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+  }
+  if (base_font_size !== undefined && base_font_size !== null) {
+    const v = validateString(base_font_size, 'Base font size', 20, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+  }
+  if (heading_scale !== undefined && heading_scale !== null) {
+    const v = validateString(heading_scale, 'Heading scale', 20, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+  }
 
   try {
     const updateRes = await db.query(
@@ -170,7 +260,25 @@ router.get('/sections', async (req, res) => {
 
 router.post('/sections', async (req, res) => {
   const { section_type, title, subtitle, body, image_url, button_text, button_url, is_visible } = req.body;
-  if (!section_type) return res.status(400).json({ error: 'Section type is required.' });
+  const vType = validateString(section_type, 'Section type', 50, true);
+  if (vType.error) return res.status(400).json({ error: vType.error });
+
+  if (title !== undefined && title !== null) {
+    const v = validateString(title, 'Title', 255, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+  }
+  if (subtitle !== undefined && subtitle !== null) {
+    const v = validateString(subtitle, 'Subtitle', 255, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+  }
+  if (button_text !== undefined && button_text !== null) {
+    const v = validateString(button_text, 'Button text', 100, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+  }
+  if (button_url !== undefined && button_url !== null) {
+    const v = validateString(button_url, 'Button URL', 255, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+  }
 
   try {
     const maxOrderRes = await db.query(`SELECT COALESCE(MAX(sort_order), 0) as max_order FROM homepage_sections WHERE creator_id = $1`, [req.creator.id]);
@@ -180,7 +288,7 @@ router.post('/sections', async (req, res) => {
       `INSERT INTO homepage_sections (creator_id, section_type, title, subtitle, body, image_url, button_text, button_url, sort_order, is_visible)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
-      [req.creator.id, section_type, title, subtitle, body, image_url, button_text, button_url, nextOrder, is_visible !== false]
+      [req.creator.id, vType.value, title, subtitle, body, image_url, button_text, button_url, nextOrder, is_visible !== false]
     );
 
     return res.status(201).json({ message: 'Homepage section created successfully!', section: newSection.rows[0] });
@@ -192,6 +300,33 @@ router.post('/sections', async (req, res) => {
 router.put('/sections/:id', async (req, res) => {
   const { id } = req.params;
   const { section_type, title, subtitle, body, image_url, button_text, button_url, is_visible, sort_order } = req.body;
+
+  let cleanSortOrder = sort_order;
+  if (sort_order !== undefined && sort_order !== null && sort_order !== '') {
+    const v = validateInt(sort_order, 'Sort order', 0, 2147483647);
+    if (v.error) return res.status(400).json({ error: v.error });
+    cleanSortOrder = v.value;
+  }
+  if (section_type !== undefined && section_type !== null) {
+    const v = validateString(section_type, 'Section type', 50, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+  }
+  if (title !== undefined && title !== null) {
+    const v = validateString(title, 'Title', 255, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+  }
+  if (subtitle !== undefined && subtitle !== null) {
+    const v = validateString(subtitle, 'Subtitle', 255, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+  }
+  if (button_text !== undefined && button_text !== null) {
+    const v = validateString(button_text, 'Button text', 100, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+  }
+  if (button_url !== undefined && button_url !== null) {
+    const v = validateString(button_url, 'Button URL', 255, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+  }
 
   try {
     const updated = await db.query(
@@ -208,7 +343,7 @@ router.put('/sections/:id', async (req, res) => {
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $10 AND creator_id = $11
        RETURNING *`,
-      [section_type, title, subtitle, body, image_url, button_text, button_url, is_visible, sort_order, id, req.creator.id]
+      [section_type, title, subtitle, body, image_url, button_text, button_url, is_visible, cleanSortOrder, id, req.creator.id]
     );
 
     if (updated.rowCount === 0) return res.status(404).json({ error: 'Section not found or unauthorized.' });
@@ -231,13 +366,25 @@ router.delete('/sections/:id', async (req, res) => {
 
 router.patch('/sections/reorder', async (req, res) => {
   const { sectionIds } = req.body;
-  if (!Array.isArray(sectionIds)) return res.status(400).json({ error: 'Invalid payload.' });
+  if (!Array.isArray(sectionIds)) return res.status(400).json({ error: 'Invalid payload. sectionIds must be an array.' });
+
+  const validIds = [];
+  for (const id of sectionIds) {
+    const num = typeof id === 'number'
+      ? id
+      : (typeof id === 'string' && /^\d+$/.test(id.trim()) ? Number(id.trim()) : NaN);
+
+    if (!Number.isInteger(num) || num < 1 || num > 2147483647) {
+      return res.status(400).json({ error: 'Invalid payload. Every section ID must be a positive integer.' });
+    }
+    validIds.push(num);
+  }
 
   const client = await db.pool.connect();
   try {
     await client.query('BEGIN');
-    for (let index = 0; index < sectionIds.length; index++) {
-      await client.query(`UPDATE homepage_sections SET sort_order = $1 WHERE id = $2 AND creator_id = $3`, [index + 1, sectionIds[index], req.creator.id]);
+    for (let index = 0; index < validIds.length; index++) {
+      await client.query(`UPDATE homepage_sections SET sort_order = $1 WHERE id = $2 AND creator_id = $3`, [index + 1, validIds[index], req.creator.id]);
     }
     await client.query('COMMIT');
     return res.json({ message: 'Sections reordered successfully!' });
@@ -261,7 +408,13 @@ router.get('/capabilities', async (req, res) => {
 
 router.post('/capabilities', async (req, res) => {
   const { title, description, icon, image_url, is_visible } = req.body;
-  if (!title) return res.status(400).json({ error: 'Capability title is required.' });
+  const vTitle = validateString(title, 'Capability title', 255, true);
+  if (vTitle.error) return res.status(400).json({ error: vTitle.error });
+
+  if (icon !== undefined && icon !== null) {
+    const v = validateString(icon, 'Icon', 100, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+  }
 
   try {
     const maxRes = await db.query(`SELECT COALESCE(MAX(sort_order), 0) as m FROM capabilities WHERE creator_id = $1`, [req.creator.id]);
@@ -270,7 +423,7 @@ router.post('/capabilities', async (req, res) => {
     const newCap = await db.query(
       `INSERT INTO capabilities (creator_id, title, description, icon, image_url, sort_order, is_visible)
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [req.creator.id, title.trim(), description, icon || 'Sparkles', image_url, nextOrder, is_visible !== false]
+      [req.creator.id, vTitle.value, description, icon || 'Sparkles', image_url, nextOrder, is_visible !== false]
     );
 
     return res.status(201).json({ message: 'Capability added successfully!', capability: newCap.rows[0] });
@@ -282,6 +435,21 @@ router.post('/capabilities', async (req, res) => {
 router.put('/capabilities/:id', async (req, res) => {
   const { id } = req.params;
   const { title, description, icon, image_url, is_visible, sort_order } = req.body;
+
+  let cleanSortOrder = sort_order;
+  if (sort_order !== undefined && sort_order !== null && sort_order !== '') {
+    const v = validateInt(sort_order, 'Sort order', 0, 2147483647);
+    if (v.error) return res.status(400).json({ error: v.error });
+    cleanSortOrder = v.value;
+  }
+  if (title !== undefined && title !== null) {
+    const v = validateString(title, 'Capability title', 255, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+  }
+  if (icon !== undefined && icon !== null) {
+    const v = validateString(icon, 'Icon', 100, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+  }
 
   try {
     const updated = await db.query(
@@ -295,7 +463,7 @@ router.put('/capabilities/:id', async (req, res) => {
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $7 AND creator_id = $8
        RETURNING *`,
-      [title, description, icon, image_url, is_visible, sort_order, id, req.creator.id]
+      [title, description, icon, image_url, is_visible, cleanSortOrder, id, req.creator.id]
     );
 
     if (updated.rowCount === 0) return res.status(404).json({ error: 'Capability not found or unauthorized.' });
@@ -331,13 +499,50 @@ router.get('/posts', async (req, res) => {
 
 router.post('/posts', async (req, res) => {
   const { title, slug, summary, content, featured_image, category_id, status } = req.body;
-  if (!title) return res.status(400).json({ error: 'Article title is required.' });
+  const vTitle = validateString(title, 'Article title', 255, true);
+  if (vTitle.error) return res.status(400).json({ error: vTitle.error });
+  const cleanTitle = vTitle.value;
 
-  const postSlug = slugify(slug || title);
+  if (slug !== undefined && slug !== null) {
+    const v = validateString(slug, 'Slug', 255, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+  }
+  if (status !== undefined && status !== null) {
+    const v = validateString(status, 'Status', 50, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+  }
+
+  const postSlug = slugify(slug || cleanTitle);
+  if (!postSlug) {
+    return res.status(400).json({ error: 'Article title must contain at least one alphanumeric character to generate a URL slug.' });
+  }
+
   const postStatus = status === 'PUBLISHED' ? 'PUBLISHED' : 'DRAFT';
   const publishedAt = postStatus === 'PUBLISHED' ? new Date() : null;
 
+  let validatedCategoryId = null;
+  if (category_id !== undefined && category_id !== null && category_id !== '') {
+    const catNum = typeof category_id === 'number'
+      ? category_id
+      : (typeof category_id === 'string' && /^\d+$/.test(category_id.trim()) ? Number(category_id.trim()) : NaN);
+
+    if (!Number.isInteger(catNum) || catNum < 1 || catNum > 2147483647) {
+      return res.status(400).json({ error: 'Invalid category format. Category ID must be a positive integer.' });
+    }
+    validatedCategoryId = catNum;
+  }
+
   try {
+    if (validatedCategoryId) {
+      const catCheck = await db.query(
+        `SELECT id FROM categories WHERE id = $1 AND (creator_id = $2 OR creator_id IN (SELECT id FROM creator_profiles WHERE username = 'admin'))`,
+        [validatedCategoryId, req.creator.id]
+      );
+      if (catCheck.rowCount === 0) {
+        return res.status(400).json({ error: 'Invalid category. Category does not exist or does not belong to your account.' });
+      }
+    }
+
     const slugCheck = await db.query(`SELECT id FROM posts WHERE creator_id = $1 AND slug = $2`, [req.creator.id, postSlug]);
     if (slugCheck.rowCount > 0) {
       return res.status(400).json({ error: 'An article with this URL slug already exists. Please choose a different title or custom slug.' });
@@ -346,11 +551,14 @@ router.post('/posts', async (req, res) => {
     const newPost = await db.query(
       `INSERT INTO posts (creator_id, category_id, title, slug, summary, content, featured_image, status, published_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-      [req.creator.id, category_id || null, title.trim(), postSlug, summary, content, featured_image, postStatus, publishedAt]
+      [req.creator.id, validatedCategoryId || null, cleanTitle, postSlug, summary, content, featured_image, postStatus, publishedAt]
     );
 
     return res.status(201).json({ message: 'Article created successfully!', post: newPost.rows[0] });
   } catch (err) {
+    if (err.code === '23505' && (err.constraint === 'unique_creator_slug' || (err.message && err.message.includes('unique_creator_slug')))) {
+      return res.status(400).json({ error: 'An article with this URL slug already exists. Please choose a different title or custom slug.' });
+    }
     return res.status(500).json({ error: 'Failed to create article.' });
   }
 });
@@ -359,12 +567,65 @@ router.put('/posts/:id', async (req, res) => {
   const { id } = req.params;
   const { title, slug, summary, content, featured_image, category_id, status } = req.body;
 
+  let cleanTitle = undefined;
+  if (title !== undefined && title !== null) {
+    const vTitle = validateString(title, 'Article title', 255, true);
+    if (vTitle.error) return res.status(400).json({ error: vTitle.error });
+    cleanTitle = vTitle.value;
+  }
+  if (slug !== undefined && slug !== null) {
+    const v = validateString(slug, 'Slug', 255, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+  }
+  if (status !== undefined && status !== null) {
+    const v = validateString(status, 'Status', 50, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+  }
+
+  let validatedCategoryId = undefined;
+  if (category_id !== undefined && category_id !== null && category_id !== '') {
+    const catNum = typeof category_id === 'number'
+      ? category_id
+      : (typeof category_id === 'string' && /^\d+$/.test(category_id.trim()) ? Number(category_id.trim()) : NaN);
+
+    if (!Number.isInteger(catNum) || catNum < 1 || catNum > 2147483647) {
+      return res.status(400).json({ error: 'Invalid category format. Category ID must be a positive integer.' });
+    }
+    validatedCategoryId = catNum;
+  } else if (category_id === null) {
+    validatedCategoryId = null;
+  }
+
   try {
     const currentPostRes = await db.query(`SELECT status FROM posts WHERE id = $1 AND creator_id = $2`, [id, req.creator.id]);
     if (currentPostRes.rowCount === 0) return res.status(404).json({ error: 'Article not found or unauthorized.' });
 
+    if (validatedCategoryId !== undefined && validatedCategoryId !== null) {
+      const catCheck = await db.query(
+        `SELECT id FROM categories WHERE id = $1 AND (creator_id = $2 OR creator_id IN (SELECT id FROM creator_profiles WHERE username = 'admin'))`,
+        [validatedCategoryId, req.creator.id]
+      );
+      if (catCheck.rowCount === 0) {
+        return res.status(400).json({ error: 'Invalid category. Category does not exist or does not belong to your account.' });
+      }
+    }
+
     const currentPost = currentPostRes.rows[0];
     const postSlug = slug ? slugify(slug) : undefined;
+    if (slug && !postSlug) {
+      return res.status(400).json({ error: 'Custom slug must contain at least one alphanumeric character.' });
+    }
+
+    if (postSlug) {
+      const slugCheck = await db.query(
+        `SELECT id FROM posts WHERE creator_id = $1 AND slug = $2 AND id != $3`,
+        [req.creator.id, postSlug, id]
+      );
+      if (slugCheck.rowCount > 0) {
+        return res.status(400).json({ error: 'An article with this URL slug already exists. Please choose a different title or custom slug.' });
+      }
+    }
+
     const postStatus = status ? (status === 'PUBLISHED' ? 'PUBLISHED' : 'DRAFT') : currentPost.status;
     let publishedAt = currentPost.published_at;
 
@@ -387,11 +648,14 @@ router.put('/posts/:id', async (req, res) => {
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $9 AND creator_id = $10
        RETURNING *`,
-      [title, postSlug, summary, content, featured_image, category_id, postStatus, publishedAt, id, req.creator.id]
+      [cleanTitle !== undefined ? cleanTitle : null, postSlug, summary, content, featured_image, validatedCategoryId !== undefined ? validatedCategoryId : null, postStatus, publishedAt, id, req.creator.id]
     );
 
     return res.json({ message: 'Article updated successfully!', post: updated.rows[0] });
   } catch (err) {
+    if (err.code === '23505' && (err.constraint === 'unique_creator_slug' || (err.message && err.message.includes('unique_creator_slug')))) {
+      return res.status(400).json({ error: 'An article with this URL slug already exists. Please choose a different title or custom slug.' });
+    }
     return res.status(500).json({ error: 'Failed to update article.' });
   }
 });
@@ -419,9 +683,23 @@ router.get('/categories', async (req, res) => {
 
 router.post('/categories', async (req, res) => {
   const { name, description } = req.body;
-  if (!name) return res.status(400).json({ error: 'Category name is required.' });
+  const vName = validateString(name, 'Category name', 100, true);
+  if (vName.error) return res.status(400).json({ error: vName.error });
+  const cleanName = vName.value;
+
+  let cleanDescription = null;
+  if (description !== undefined && description !== null) {
+    if (typeof description !== 'string') {
+      return res.status(400).json({ error: 'Description must be a string.' });
+    }
+    cleanDescription = description.trim();
+  }
+
   try {
-    const newCat = await db.query(`INSERT INTO categories (creator_id, name, description) VALUES ($1, $2, $3) RETURNING *`, [req.creator.id, name.trim(), description]);
+    const newCat = await db.query(
+      `INSERT INTO categories (creator_id, name, description) VALUES ($1, $2, $3) RETURNING *`,
+      [req.creator.id, cleanName, cleanDescription]
+    );
     return res.status(201).json({ message: 'Category created!', category: newCat.rows[0] });
   } catch (err) {
     return res.status(500).json({ error: 'Failed to create category.' });
@@ -431,8 +709,27 @@ router.post('/categories', async (req, res) => {
 router.put('/categories/:id', async (req, res) => {
   const { id } = req.params;
   const { name, description } = req.body;
+
+  let cleanName = undefined;
+  if (name !== undefined && name !== null) {
+    const vName = validateString(name, 'Category name', 100, true);
+    if (vName.error) return res.status(400).json({ error: vName.error });
+    cleanName = vName.value;
+  }
+
+  let cleanDescription = undefined;
+  if (description !== undefined && description !== null) {
+    if (typeof description !== 'string') {
+      return res.status(400).json({ error: 'Description must be a string.' });
+    }
+    cleanDescription = description.trim();
+  }
+
   try {
-    const updated = await db.query(`UPDATE categories SET name = COALESCE($1, name), description = COALESCE($2, description) WHERE id = $3 AND creator_id = $4 RETURNING *`, [name, description, id, req.creator.id]);
+    const updated = await db.query(
+      `UPDATE categories SET name = COALESCE($1, name), description = COALESCE($2, description) WHERE id = $3 AND creator_id = $4 RETURNING *`,
+      [cleanName !== undefined ? cleanName : null, cleanDescription !== undefined ? cleanDescription : null, id, req.creator.id]
+    );
     if (updated.rowCount === 0) return res.status(404).json({ error: 'Category not found.' });
     return res.json({ message: 'Category updated!', category: updated.rows[0] });
   } catch (err) {
@@ -463,12 +760,30 @@ router.get('/testimonials', async (req, res) => {
 
 router.post('/testimonials', async (req, res) => {
   const { name, role, message, avatar_url, rating, is_visible } = req.body;
-  if (!name || !message) return res.status(400).json({ error: 'Name and message are required.' });
+  const vName = validateString(name, 'Name', 255, true);
+  if (vName.error) return res.status(400).json({ error: vName.error });
+
+  if (typeof message !== 'string' || !message.trim()) {
+    return res.status(400).json({ error: 'Message is required and cannot be empty.' });
+  }
+
+  if (role !== undefined && role !== null) {
+    const v = validateString(role, 'Role', 255, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+  }
+
+  let cleanRating = 5;
+  if (rating !== undefined && rating !== null && rating !== '') {
+    const vRating = validateInt(rating, 'Rating', 1, 5);
+    if (vRating.error) return res.status(400).json({ error: vRating.error });
+    cleanRating = vRating.value;
+  }
+
   try {
     const newItem = await db.query(
       `INSERT INTO testimonials (creator_id, name, role, message, avatar_url, rating, is_visible)
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [req.creator.id, name.trim(), role, message, avatar_url, rating || 5, is_visible !== false]
+      [req.creator.id, vName.value, role, message.trim(), avatar_url, cleanRating, is_visible !== false]
     );
     return res.status(201).json({ message: 'Testimonial added!', testimonial: newItem.rows[0] });
   } catch (err) {
@@ -479,13 +794,41 @@ router.post('/testimonials', async (req, res) => {
 router.put('/testimonials/:id', async (req, res) => {
   const { id } = req.params;
   const { name, role, message, avatar_url, rating, is_visible } = req.body;
+
+  let cleanName = undefined;
+  if (name !== undefined && name !== null) {
+    const vName = validateString(name, 'Name', 255, true);
+    if (vName.error) return res.status(400).json({ error: vName.error });
+    cleanName = vName.value;
+  }
+
+  let cleanMessage = undefined;
+  if (message !== undefined && message !== null) {
+    if (typeof message !== 'string' || !message.trim()) {
+      return res.status(400).json({ error: 'Message cannot be empty.' });
+    }
+    cleanMessage = message.trim();
+  }
+
+  if (role !== undefined && role !== null) {
+    const v = validateString(role, 'Role', 255, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+  }
+
+  let cleanRating = undefined;
+  if (rating !== undefined && rating !== null && rating !== '') {
+    const vRating = validateInt(rating, 'Rating', 1, 5);
+    if (vRating.error) return res.status(400).json({ error: vRating.error });
+    cleanRating = vRating.value;
+  }
+
   try {
     const updated = await db.query(
       `UPDATE testimonials
        SET name = COALESCE($1, name), role = COALESCE($2, role), message = COALESCE($3, message),
            avatar_url = COALESCE($4, avatar_url), rating = COALESCE($5, rating), is_visible = COALESCE($6, is_visible)
        WHERE id = $7 AND creator_id = $8 RETURNING *`,
-      [name, role, message, avatar_url, rating, is_visible, id, req.creator.id]
+      [cleanName !== undefined ? cleanName : null, role, cleanMessage !== undefined ? cleanMessage : null, avatar_url, cleanRating !== undefined ? cleanRating : null, is_visible, id, req.creator.id]
     );
     if (updated.rowCount === 0) return res.status(404).json({ error: 'Testimonial not found.' });
     return res.json({ message: 'Testimonial updated!', testimonial: updated.rows[0] });
@@ -517,7 +860,12 @@ router.get('/faqs', async (req, res) => {
 
 router.post('/faqs', async (req, res) => {
   const { question, answer, is_visible } = req.body;
-  if (!question || !answer) return res.status(400).json({ error: 'Question and answer are required.' });
+  if (typeof question !== 'string' || !question.trim()) {
+    return res.status(400).json({ error: 'Question is required and cannot be empty.' });
+  }
+  if (typeof answer !== 'string' || !answer.trim()) {
+    return res.status(400).json({ error: 'Answer is required and cannot be empty.' });
+  }
   try {
     const maxOrder = await db.query(`SELECT COALESCE(MAX(sort_order), 0) as m FROM faqs WHERE creator_id = $1`, [req.creator.id]);
     const nextOrder = parseInt(maxOrder.rows[0].m, 10) + 1;
@@ -535,13 +883,37 @@ router.post('/faqs', async (req, res) => {
 router.put('/faqs/:id', async (req, res) => {
   const { id } = req.params;
   const { question, answer, is_visible, sort_order } = req.body;
+
+  let cleanQuestion = undefined;
+  if (question !== undefined && question !== null) {
+    if (typeof question !== 'string' || !question.trim()) {
+      return res.status(400).json({ error: 'Question cannot be empty.' });
+    }
+    cleanQuestion = question.trim();
+  }
+
+  let cleanAnswer = undefined;
+  if (answer !== undefined && answer !== null) {
+    if (typeof answer !== 'string' || !answer.trim()) {
+      return res.status(400).json({ error: 'Answer cannot be empty.' });
+    }
+    cleanAnswer = answer.trim();
+  }
+
+  let cleanSortOrder = undefined;
+  if (sort_order !== undefined && sort_order !== null && sort_order !== '') {
+    const v = validateInt(sort_order, 'Sort order', 0, 2147483647);
+    if (v.error) return res.status(400).json({ error: v.error });
+    cleanSortOrder = v.value;
+  }
+
   try {
     const updated = await db.query(
       `UPDATE faqs
        SET question = COALESCE($1, question), answer = COALESCE($2, answer),
            is_visible = COALESCE($3, is_visible), sort_order = COALESCE($4, sort_order), updated_at = CURRENT_TIMESTAMP
        WHERE id = $5 AND creator_id = $6 RETURNING *`,
-      [question, answer, is_visible, sort_order, id, req.creator.id]
+      [cleanQuestion !== undefined ? cleanQuestion : null, cleanAnswer !== undefined ? cleanAnswer : null, is_visible, cleanSortOrder !== undefined ? cleanSortOrder : null, id, req.creator.id]
     );
     if (updated.rowCount === 0) return res.status(404).json({ error: 'FAQ not found.' });
     return res.json({ message: 'FAQ updated!', faq: updated.rows[0] });
@@ -573,11 +945,43 @@ router.get('/media', async (req, res) => {
 
 router.post('/media', async (req, res) => {
   const { url, title, alt_text, media_type } = req.body;
-  if (!url) return res.status(400).json({ error: 'Media URL is required.' });
+  if (typeof url !== 'string' || !url.trim()) {
+    return res.status(400).json({ error: 'Media URL is required and must be a non-empty string.' });
+  }
+  const cleanUrl = url.trim();
+  if (cleanUrl.length > 2048) {
+    return res.status(400).json({ error: 'Media URL must be 2048 characters or fewer.' });
+  }
+
+  let cleanTitle = 'Untitled Media';
+  if (title !== undefined && title !== null) {
+    const v = validateString(title, 'Title', 255, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+    cleanTitle = v.value || 'Untitled Media';
+  }
+
+  let cleanAlt = cleanTitle;
+  if (alt_text !== undefined && alt_text !== null) {
+    if (typeof alt_text !== 'string') {
+      return res.status(400).json({ error: 'Alt text must be a string.' });
+    }
+    if (alt_text.trim().length > 255) {
+      return res.status(400).json({ error: 'Alt text must be 255 characters or fewer.' });
+    }
+    cleanAlt = alt_text.trim();
+  }
+
+  let cleanMediaType = 'image';
+  if (media_type !== undefined && media_type !== null) {
+    const v = validateString(media_type, 'Media type', 50, false);
+    if (v.error) return res.status(400).json({ error: v.error });
+    cleanMediaType = v.value || 'image';
+  }
+
   try {
     const newMedia = await db.query(
       `INSERT INTO media (creator_id, url, title, alt_text, media_type) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [req.creator.id, url.trim(), title || 'Untitled Media', alt_text || title || '', media_type || 'image']
+      [req.creator.id, cleanUrl, cleanTitle, cleanAlt, cleanMediaType]
     );
     return res.status(201).json({ message: 'Media item added!', media: newMedia.rows[0] });
   } catch (err) {

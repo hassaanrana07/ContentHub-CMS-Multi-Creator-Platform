@@ -7,8 +7,7 @@ function sanitizeString(str) {
   if (typeof str !== 'string') return str;
   return str
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '') // Remove <script> tags
-    .replace(/on\w+="[^"]*"/gi, '') // Remove inline event handlers like onload="..."
-    .replace(/on\w+='[^']*'/gi, '')
+    .replace(/\bon\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '') // Remove inline event handlers (quoted, unquoted, spaced)
     .replace(/javascript:[^\s"']*/gi, ''); // Remove javascript: pseudo-protocol
 }
 

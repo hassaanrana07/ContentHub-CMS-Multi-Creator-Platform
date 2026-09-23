@@ -10,6 +10,7 @@ const enableSsl = process.env.DB_SSL === 'true' || (isProduction && isRemoteDb) 
 const pool = new Pool({
   connectionString,
   ssl: enableSsl ? { rejectUnauthorized: false } : false,
+  connectionTimeoutMillis: 5000, // Fail fast after 5s if pool cannot acquire a client
 });
 
 pool.on('error', (err) => {

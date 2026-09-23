@@ -48,7 +48,7 @@ export const CreatorOverview = () => {
     { title: 'Media Items', count: stats?.mediaItems, icon: ImageIcon, color: 'text-warm-gold bg-warm-gold/10', link: '/dashboard/media' },
   ];
 
-  const publicUrl = creator?.username ? `/site/${creator.username}` : '#';
+  const publicUrl = creator?.username ? `/${creator.username}` : '#';
 
   return (
     <div className="space-y-8 font-sans">

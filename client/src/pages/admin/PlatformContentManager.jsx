@@ -106,7 +106,7 @@ export const PlatformContentManager = () => {
                   <tr key={post.id} className="hover:bg-warm-hover/50 transition-colors">
                     <td className="px-6 py-4">
                       <p className="font-serif font-bold text-warm-charcoal">{post.title}</p>
-                      <p className="text-xs font-mono text-warm-muted">/site/{post.creator_username}/articles/{post.slug}</p>
+                      <p className="text-xs font-mono text-warm-muted">/{post.creator_username}/articles/{post.slug}</p>
                     </td>
                     <td className="px-6 py-4">
                       <p className="font-medium text-warm-charcoal text-xs">{post.creator_name}</p>

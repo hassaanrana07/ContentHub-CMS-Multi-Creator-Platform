@@ -109,7 +109,7 @@ export const CreatorManagement = () => {
               <tbody className="divide-y divide-warm-border">
                 {creators.map((c) => {
                   const isActive = c.status === 'ACTIVE';
-                  const publicUrl = `/site/${c.username}`;
+                  const publicUrl = `/${c.username}`;
                   return (
                     <tr key={c.creator_id} className="hover:bg-warm-hover/50 transition-colors">
                       <td className="px-6 py-4">

@@ -6,6 +6,15 @@ const { authenticateToken, requireRole } = require('../middleware/auth');
 router.use(authenticateToken);
 router.use(requireRole('ADMIN'));
 
+// Validate route :id parameter format to prevent SQL syntax errors (22003, 22P02)
+router.param('id', (req, res, next, id) => {
+  const numId = Number(id);
+  if (!/^\d+$/.test(id) || !Number.isInteger(numId) || numId < 1 || numId > 2147483647) {
+    return res.status(400).json({ error: 'Invalid identifier format. Resource ID must be a positive integer.' });
+  }
+  next();
+});
+
 // Helper to get Admin creator_profile ID
 async function getAdminCreatorId() {
   const res = await db.query(`SELECT id FROM creator_profiles WHERE username = 'admin'`);
@@ -28,28 +37,60 @@ async function logActivity(userId, actorName, action, targetInfo) {
 // 1. ADMIN DASHBOARD STATS & CHARTS
 router.get('/stats', async (req, res) => {
   try {
-    const creatorsCount = await db.query(`SELECT COUNT(*) FROM creator_profiles WHERE username != 'admin'`);
-    const activeCreatorsCount = await db.query(`SELECT COUNT(*) FROM users WHERE role = 'CREATOR' AND status = 'ACTIVE'`);
-    const suspendedCreatorsCount = await db.query(`SELECT COUNT(*) FROM users WHERE role = 'CREATOR' AND status = 'SUSPENDED'`);
-
-    const postsCount = await db.query(`SELECT COUNT(*) FROM posts`);
-    const publishedPostsCount = await db.query(`SELECT COUNT(*) FROM posts WHERE status = 'PUBLISHED'`);
-    const draftPostsCount = await db.query(`SELECT COUNT(*) FROM posts WHERE status = 'DRAFT'`);
-
-    const mediaCount = await db.query(`SELECT COUNT(*) FROM media`);
-    const messagesCount = await db.query(`SELECT COUNT(*) FROM contact_messages`);
-
-    // Chart 1: Creator Growth over time
-    const growthRes = await db.query(`
-      SELECT TO_CHAR(created_at, 'Mon YYYY') as month, COUNT(*) as count
-      FROM users WHERE role = 'CREATOR'
-      GROUP BY TO_CHAR(created_at, 'Mon YYYY'), DATE_TRUNC('month', created_at)
-      ORDER BY DATE_TRUNC('month', created_at) ASC
-    `);
-
-    // Chart 2: Content Distribution
-    const testimonialsCount = await db.query(`SELECT COUNT(*) FROM testimonials`);
-    const faqsCount = await db.query(`SELECT COUNT(*) FROM faqs`);
+    // Execute all 14 independent aggregation queries concurrently
+    const [
+      creatorsCount,
+      activeCreatorsCount,
+      suspendedCreatorsCount,
+      postsCount,
+      publishedPostsCount,
+      draftPostsCount,
+      mediaCount,
+      messagesCount,
+      growthRes,
+      testimonialsCount,
+      faqsCount,
+      creatorArticlesRes,
+      monthlyContentRes,
+      monthlyMessagesRes
+    ] = await Promise.all([
+      db.query(`SELECT COUNT(*) FROM creator_profiles WHERE username != 'admin'`),
+      db.query(`SELECT COUNT(*) FROM users WHERE role = 'CREATOR' AND status = 'ACTIVE'`),
+      db.query(`SELECT COUNT(*) FROM users WHERE role = 'CREATOR' AND status = 'SUSPENDED'`),
+      db.query(`SELECT COUNT(*) FROM posts`),
+      db.query(`SELECT COUNT(*) FROM posts WHERE status = 'PUBLISHED'`),
+      db.query(`SELECT COUNT(*) FROM posts WHERE status = 'DRAFT'`),
+      db.query(`SELECT COUNT(*) FROM media`),
+      db.query(`SELECT COUNT(*) FROM contact_messages`),
+      db.query(`
+        SELECT TO_CHAR(created_at, 'Mon YYYY') as month, COUNT(*) as count
+        FROM users WHERE role = 'CREATOR'
+        GROUP BY TO_CHAR(created_at, 'Mon YYYY'), DATE_TRUNC('month', created_at)
+        ORDER BY DATE_TRUNC('month', created_at) ASC
+      `),
+      db.query(`SELECT COUNT(*) FROM testimonials`),
+      db.query(`SELECT COUNT(*) FROM faqs`),
+      db.query(`
+        SELECT p.display_name,
+               COUNT(CASE WHEN post.status = 'PUBLISHED' THEN 1 END) as published,
+               COUNT(CASE WHEN post.status = 'DRAFT' THEN 1 END) as draft
+        FROM creator_profiles p
+        LEFT JOIN posts post ON post.creator_id = p.id
+        WHERE p.username != 'admin'
+        GROUP BY p.id, p.display_name
+        ORDER BY p.display_name ASC LIMIT 8
+      `),
+      db.query(`
+        SELECT TO_CHAR(created_at, 'Mon YYYY') as month, COUNT(*) as count
+        FROM posts GROUP BY TO_CHAR(created_at, 'Mon YYYY'), DATE_TRUNC('month', created_at)
+        ORDER BY DATE_TRUNC('month', created_at) ASC
+      `),
+      db.query(`
+        SELECT TO_CHAR(created_at, 'Mon YYYY') as month, COUNT(*) as count
+        FROM contact_messages GROUP BY TO_CHAR(created_at, 'Mon YYYY'), DATE_TRUNC('month', created_at)
+        ORDER BY DATE_TRUNC('month', created_at) ASC
+      `)
+    ]);
 
     const contentDistribution = [
       { name: 'Articles', count: parseInt(postsCount.rows[0].count, 10), fill: '#A65F46' },
@@ -58,37 +99,10 @@ router.get('/stats', async (req, res) => {
       { name: 'FAQs', count: parseInt(faqsCount.rows[0].count, 10), fill: '#24211E' }
     ];
 
-    // Chart 3: Published vs Draft Articles per Creator
-    const creatorArticlesRes = await db.query(`
-      SELECT p.display_name,
-             COUNT(CASE WHEN post.status = 'PUBLISHED' THEN 1 END) as published,
-             COUNT(CASE WHEN post.status = 'DRAFT' THEN 1 END) as draft
-      FROM creator_profiles p
-      LEFT JOIN posts post ON post.creator_id = p.id
-      WHERE p.username != 'admin'
-      GROUP BY p.id, p.display_name
-      ORDER BY p.display_name ASC LIMIT 8
-    `);
-
-    // Chart 4: Creator Status Breakdown
     const statusBreakdown = [
       { name: 'Active Creators', count: parseInt(activeCreatorsCount.rows[0].count, 10), fill: '#6B4F3A' },
       { name: 'Suspended Creators', count: parseInt(suspendedCreatorsCount.rows[0].count, 10), fill: '#A65F46' }
     ];
-
-    // Chart 5: Monthly Content Creation
-    const monthlyContentRes = await db.query(`
-      SELECT TO_CHAR(created_at, 'Mon YYYY') as month, COUNT(*) as count
-      FROM posts GROUP BY TO_CHAR(created_at, 'Mon YYYY'), DATE_TRUNC('month', created_at)
-      ORDER BY DATE_TRUNC('month', created_at) ASC
-    `);
-
-    // Chart 6: Contact Messages Received
-    const monthlyMessagesRes = await db.query(`
-      SELECT TO_CHAR(created_at, 'Mon YYYY') as month, COUNT(*) as count
-      FROM contact_messages GROUP BY TO_CHAR(created_at, 'Mon YYYY'), DATE_TRUNC('month', created_at)
-      ORDER BY DATE_TRUNC('month', created_at) ASC
-    `);
 
     return res.json({
       overview: {
@@ -132,9 +146,10 @@ router.get('/creators', async (req, res) => {
     `;
     const params = [];
 
-    if (search && search.trim() !== '') {
+    const cleanSearch = typeof search === 'string' ? search.trim().toLowerCase() : '';
+    if (cleanSearch !== '') {
       query += ` AND (LOWER(p.display_name) LIKE $1 OR LOWER(p.username) LIKE $1 OR LOWER(u.email) LIKE $1)`;
-      params.push(`%${search.trim().toLowerCase()}%`);
+      params.push(`%${cleanSearch}%`);
     }
 
     query += ` GROUP BY p.id, u.id ORDER BY u.created_at DESC`;
@@ -159,6 +174,12 @@ router.patch('/creators/:id/status', async (req, res) => {
     if (creatorRes.rowCount === 0) return res.status(404).json({ error: 'Creator profile not found.' });
 
     const creatorObj = creatorRes.rows[0];
+
+    // Administrative safeguard: Prevent suspending self
+    if (creatorObj.user_id === req.user.id) {
+      return res.status(403).json({ error: 'Administrative action forbidden: You cannot alter the suspension status of your own account.' });
+    }
+
     const updateRes = await db.query(
       `UPDATE users SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING id, status`,
       [status, creatorObj.user_id]
@@ -176,9 +197,21 @@ router.delete('/creators/:id', async (req, res) => {
   const { id } = req.params;
   try {
     const creatorRes = await db.query(`SELECT user_id, display_name FROM creator_profiles WHERE id = $1`, [id]);
-    if (creatorRes.rowCount === 0) return res.status(404).json({ error: 'Creator not found.' });
+    if (creatorRes.rowCount === 0) return res.status(404).json({ error: 'Creator profile not found.' });
 
     const creatorObj = creatorRes.rows[0];
+
+    // Administrative safeguard: Prevent deleting self
+    if (creatorObj.user_id === req.user.id) {
+      return res.status(403).json({ error: 'Administrative action forbidden: You cannot delete your own administrator account.' });
+    }
+
+    // Safeguard: Prevent deleting any platform administrator accounts through creator management
+    const userRoleCheck = await db.query(`SELECT role FROM users WHERE id = $1`, [creatorObj.user_id]);
+    if (userRoleCheck.rowCount > 0 && userRoleCheck.rows[0].role === 'ADMIN') {
+      return res.status(403).json({ error: 'Administrative action forbidden: Platform administrator accounts cannot be deleted through this endpoint.' });
+    }
+
     await db.query(`DELETE FROM users WHERE id = $1`, [creatorObj.user_id]);
 
     await logActivity(req.user.id, req.user.name, 'Deleted Creator Account', creatorObj.display_name);
@@ -277,16 +310,57 @@ router.post('/media', async (req, res) => {
   const adminId = await getAdminCreatorId();
   const { url, title, alt_text, media_type } = req.body;
 
-  if (!url) return res.status(400).json({ error: 'Media URL is required.' });
+  if (typeof url !== 'string' || !url.trim()) {
+    return res.status(400).json({ error: 'Media URL is required and must be a non-empty string.' });
+  }
+
+  const cleanUrl = url.trim();
+  if (cleanUrl.length > 2048) {
+    return res.status(400).json({ error: 'Media URL must be 2048 characters or fewer.' });
+  }
+
+  let cleanTitle = 'Platform Media';
+  if (title !== undefined && title !== null) {
+    if (typeof title !== 'string') {
+      return res.status(400).json({ error: 'Title must be a string.' });
+    }
+    const trimmedTitle = title.trim();
+    if (trimmedTitle.length > 255) {
+      return res.status(400).json({ error: 'Title must be 255 characters or fewer.' });
+    }
+    cleanTitle = trimmedTitle || 'Platform Media';
+  }
+
+  let cleanAlt = cleanTitle;
+  if (alt_text !== undefined && alt_text !== null) {
+    if (typeof alt_text !== 'string') {
+      return res.status(400).json({ error: 'Alt text must be a string.' });
+    }
+    if (alt_text.trim().length > 255) {
+      return res.status(400).json({ error: 'Alt text must be 255 characters or fewer.' });
+    }
+    cleanAlt = alt_text.trim();
+  }
+
+  let cleanMediaType = 'image';
+  if (media_type !== undefined && media_type !== null) {
+    if (typeof media_type !== 'string') {
+      return res.status(400).json({ error: 'Media type must be a string.' });
+    }
+    if (media_type.trim().length > 50) {
+      return res.status(400).json({ error: 'Media type must be 50 characters or fewer.' });
+    }
+    cleanMediaType = media_type.trim() || 'image';
+  }
 
   try {
     const newMedia = await db.query(
       `INSERT INTO media (creator_id, url, title, alt_text, media_type)
        VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [adminId, url.trim(), title || 'Platform Media', alt_text || title || '', media_type || 'image']
+      [adminId, cleanUrl, cleanTitle, cleanAlt, cleanMediaType]
     );
 
-    await logActivity(req.user.id, req.user.name, 'Added Platform Media Asset', title || url);
+    await logActivity(req.user.id, req.user.name, 'Added Platform Media Asset', cleanTitle);
 
     return res.status(201).json({ message: 'Media item added to platform library!', media: newMedia.rows[0] });
   } catch (err) {
@@ -344,21 +418,22 @@ router.delete('/messages/:id', async (req, res) => {
 // 7. PLATFORM CONTENT & CATEGORIES
 router.get('/content', async (req, res) => {
   try {
-    const postsRes = await db.query(`
-      SELECT p.id, p.title, p.slug, p.status, p.created_at, p.published_at,
-             c.username as creator_username, c.display_name as creator_name
-      FROM posts p
-      JOIN creator_profiles c ON c.id = p.creator_id
-      ORDER BY p.created_at DESC LIMIT 100
-    `);
-
-    const mediaRes = await db.query(`
-      SELECT m.id, m.url, m.title, m.media_type, m.created_at,
-             c.username as creator_username, c.display_name as creator_name
-      FROM media m
-      JOIN creator_profiles c ON c.id = m.creator_id
-      ORDER BY m.created_at DESC LIMIT 100
-    `);
+    const [postsRes, mediaRes] = await Promise.all([
+      db.query(`
+        SELECT p.id, p.title, p.slug, p.status, p.created_at, p.published_at,
+               c.username as creator_username, c.display_name as creator_name
+        FROM posts p
+        JOIN creator_profiles c ON c.id = p.creator_id
+        ORDER BY p.created_at DESC LIMIT 100
+      `),
+      db.query(`
+        SELECT m.id, m.url, m.title, m.media_type, m.created_at,
+               c.username as creator_username, c.display_name as creator_name
+        FROM media m
+        JOIN creator_profiles c ON c.id = m.creator_id
+        ORDER BY m.created_at DESC LIMIT 100
+      `)
+    ]);
 
     return res.json({ posts: postsRes.rows, media: mediaRes.rows });
   } catch (err) {
@@ -399,15 +474,31 @@ router.get('/categories', async (req, res) => {
 
 router.post('/categories', async (req, res) => {
   const { name, description } = req.body;
-  if (!name) return res.status(400).json({ error: 'Category name is required.' });
+  if (typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json({ error: 'Category name is required and must be a non-empty string.' });
+  }
+
+  const cleanName = name.trim();
+  if (cleanName.length > 100) {
+    return res.status(400).json({ error: 'Category name must be 100 characters or fewer.' });
+  }
+
+  let cleanDescription = null;
+  if (description !== undefined && description !== null) {
+    if (typeof description !== 'string') {
+      return res.status(400).json({ error: 'Description must be a string.' });
+    }
+    cleanDescription = description.trim();
+  }
+
   try {
     const adminId = await getAdminCreatorId();
     const newCat = await db.query(
       `INSERT INTO categories (creator_id, name, description) VALUES ($1, $2, $3) RETURNING *`,
-      [adminId, name.trim(), description]
+      [adminId, cleanName, cleanDescription]
     );
 
-    await logActivity(req.user.id, req.user.name, 'Created Global Platform Category', name.trim());
+    await logActivity(req.user.id, req.user.name, 'Created Global Platform Category', cleanName);
 
     return res.status(201).json({ message: 'Global platform category created!', category: newCat.rows[0] });
   } catch (err) {

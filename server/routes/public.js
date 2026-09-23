@@ -45,47 +45,57 @@ async function getPublicSiteData(req, res) {
   }
 
   try {
-    const settingsRes = await db.query(`SELECT * FROM website_settings WHERE creator_id = $1`, [creator.id]);
-    const navSettingsRes = await db.query(`SELECT * FROM navigation_settings WHERE creator_id = $1`, [creator.id]);
-    const sectionsRes = await db.query(
-      `SELECT * FROM homepage_sections WHERE creator_id = $1 AND is_visible = true ORDER BY sort_order ASC, id ASC`,
-      [creator.id]
-    );
-    const capabilitiesRes = await db.query(
-      `SELECT * FROM capabilities WHERE creator_id = $1 AND is_visible = true ORDER BY sort_order ASC, id ASC`,
-      [creator.id]
-    );
+    // Execute all 10 independent read queries concurrently
+    const [
+      settingsRes,
+      navSettingsRes,
+      sectionsRes,
+      capabilitiesRes,
+      recentPostsRes,
+      totalPostsCountRes,
+      testimonialsRes,
+      faqsRes,
+      contactInfoRes,
+      mediaRes
+    ] = await Promise.all([
+      db.query(`SELECT * FROM website_settings WHERE creator_id = $1`, [creator.id]),
+      db.query(`SELECT * FROM navigation_settings WHERE creator_id = $1`, [creator.id]),
+      db.query(
+        `SELECT * FROM homepage_sections WHERE creator_id = $1 AND is_visible = true ORDER BY sort_order ASC, id ASC`,
+        [creator.id]
+      ),
+      db.query(
+        `SELECT * FROM capabilities WHERE creator_id = $1 AND is_visible = true ORDER BY sort_order ASC, id ASC`,
+        [creator.id]
+      ),
+      db.query(
+        `SELECT p.id, p.title, p.slug, p.summary, p.featured_image, p.published_at, c.name as category_name
+         FROM posts p
+         LEFT JOIN categories c ON c.id = p.category_id
+         WHERE p.creator_id = $1 AND p.status = 'PUBLISHED'
+         ORDER BY p.published_at DESC LIMIT 3`,
+        [creator.id]
+      ),
+      db.query(
+        `SELECT COUNT(*) FROM posts WHERE creator_id = $1 AND status = 'PUBLISHED'`,
+        [creator.id]
+      ),
+      db.query(
+        `SELECT id, name, role, message, avatar_url, rating FROM testimonials WHERE creator_id = $1 AND is_visible = true ORDER BY created_at DESC`,
+        [creator.id]
+      ),
+      db.query(
+        `SELECT id, question, answer, sort_order FROM faqs WHERE creator_id = $1 AND is_visible = true ORDER BY sort_order ASC, id ASC`,
+        [creator.id]
+      ),
+      db.query(`SELECT * FROM contact_information WHERE creator_id = $1`, [creator.id]),
+      db.query(
+        `SELECT id, url, title, alt_text, media_type FROM media WHERE creator_id = $1 ORDER BY created_at DESC LIMIT 12`,
+        [creator.id]
+      )
+    ]);
 
-    // Fetch maximum 3 published posts for the homepage
-    const recentPostsRes = await db.query(
-      `SELECT p.id, p.title, p.slug, p.summary, p.featured_image, p.published_at, c.name as category_name
-       FROM posts p
-       LEFT JOIN categories c ON c.id = p.category_id
-       WHERE p.creator_id = $1 AND p.status = 'PUBLISHED'
-       ORDER BY p.published_at DESC LIMIT 3`,
-      [creator.id]
-    );
-
-    // Fetch total count of published posts to determine if "View All Articles" button should show
-    const totalPostsCountRes = await db.query(
-      `SELECT COUNT(*) FROM posts WHERE creator_id = $1 AND status = 'PUBLISHED'`,
-      [creator.id]
-    );
     const publishedPostsCount = parseInt(totalPostsCountRes.rows[0].count, 10);
-
-    const testimonialsRes = await db.query(
-      `SELECT id, name, role, message, avatar_url, rating FROM testimonials WHERE creator_id = $1 AND is_visible = true ORDER BY created_at DESC`,
-      [creator.id]
-    );
-    const faqsRes = await db.query(
-      `SELECT id, question, answer, sort_order FROM faqs WHERE creator_id = $1 AND is_visible = true ORDER BY sort_order ASC, id ASC`,
-      [creator.id]
-    );
-    const contactInfoRes = await db.query(`SELECT * FROM contact_information WHERE creator_id = $1`, [creator.id]);
-    const mediaRes = await db.query(
-      `SELECT id, url, title, alt_text, media_type FROM media WHERE creator_id = $1 ORDER BY created_at DESC LIMIT 12`,
-      [creator.id]
-    );
 
     return res.json({
       creator: {
@@ -172,8 +182,34 @@ router.post('/site/:username/contact', async (req, res) => {
   const { username } = req.params;
   const { name, email, subject, message } = req.body;
 
-  if (!name || !email || !message) {
-    return res.status(400).json({ error: 'Name, email, and message are required.' });
+  if (
+    typeof name !== 'string' || !name.trim() ||
+    typeof email !== 'string' || !email.trim() ||
+    typeof message !== 'string' || !message.trim()
+  ) {
+    return res.status(400).json({ error: 'Name, email, and message are required and must be non-empty strings.' });
+  }
+
+  const cleanName = name.trim();
+  const cleanEmail = email.trim();
+  const cleanMessage = message.trim();
+
+  if (cleanName.length > 255 || cleanEmail.length > 255) {
+    return res.status(400).json({ error: 'Name and email must each be 255 characters or fewer.' });
+  }
+
+  let cleanSubject = 'Website Contact Form Inquiry';
+  if (subject !== undefined && subject !== null) {
+    if (typeof subject !== 'string') {
+      return res.status(400).json({ error: 'Subject must be a string.' });
+    }
+    const trimmedSubject = subject.trim();
+    if (trimmedSubject.length > 255) {
+      return res.status(400).json({ error: 'Subject must be 255 characters or fewer.' });
+    }
+    if (trimmedSubject.length > 0) {
+      cleanSubject = trimmedSubject;
+    }
   }
 
   const { creator, error, status } = await getActiveCreator(username);
@@ -185,7 +221,7 @@ router.post('/site/:username/contact', async (req, res) => {
     await db.query(
       `INSERT INTO contact_messages (creator_id, name, email, subject, message)
        VALUES ($1, $2, $3, $4, $5)`,
-      [creator.id, name.trim(), email.trim(), subject || 'Website Contact Form Inquiry', message.trim()]
+      [creator.id, cleanName, cleanEmail, cleanSubject, cleanMessage]
     );
 
     return res.status(201).json({ message: 'Message sent successfully! Thank you for getting in touch.' });

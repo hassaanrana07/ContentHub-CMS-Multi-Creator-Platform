@@ -52,12 +52,25 @@ export const AuthProvider = ({ children }) => {
     return res.data;
   };
 
-  const logout = () => {
-    localStorage.removeItem('contenthub_token');
-    delete axios.defaults.headers.common['Authorization'];
-    setToken(null);
-    setUser(null);
-    setCreator(null);
+  const logout = async () => {
+    const activeToken = token || localStorage.getItem('contenthub_token');
+    try {
+      if (activeToken) {
+        // Attempt server-side token revocation (with 4s timeout against network hang)
+        await axios.post('/api/auth/logout', null, {
+          headers: { Authorization: `Bearer ${activeToken}` },
+          timeout: 4000
+        });
+      }
+    } catch (err) {
+      console.warn('Server logout revocation notice (proceeding with local logout):', err?.response?.data?.error || err?.message);
+    } finally {
+      localStorage.removeItem('contenthub_token');
+      delete axios.defaults.headers.common['Authorization'];
+      setToken(null);
+      setUser(null);
+      setCreator(null);
+    }
   };
 
   return (

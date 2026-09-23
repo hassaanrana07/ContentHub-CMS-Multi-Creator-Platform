@@ -159,7 +159,7 @@ export const WebsiteBuilder = () => {
     }
   };
 
-  const publicUrl = creator?.username ? `/site/${creator.username}` : '#';
+  const publicUrl = creator?.username ? `/${creator.username}` : '#';
 
   const sectionTypes = [
     { value: 'hero', label: 'Hero Banner' },
@@ -417,7 +417,7 @@ export const WebsiteBuilder = () => {
                 type="text"
                 value={formData.button_url}
                 onChange={(e) => setFormData({ ...formData, button_url: e.target.value })}
-                placeholder="e.g. #articles or /site/hassan/articles"
+                placeholder="e.g. #articles or /hassan/articles"
                 className="w-full px-3.5 py-2 bg-warm-bg border border-warm-border rounded-lg text-sm text-warm-text focus:outline-none focus:border-warm-brown"
               />
             </div>
