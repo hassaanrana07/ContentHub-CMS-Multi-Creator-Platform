@@ -4,6 +4,7 @@ import { Modal } from '../../components/ui/Modal';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Toast } from '../../components/ui/Toast';
 import { Image as ImageIcon, Plus, Trash2, Copy, Check, ExternalLink } from 'lucide-react';
+import { sanitizeUrl } from '../../utils/sanitizeUrl';
 
 export const MediaLibrary = () => {
   const [mediaItems, setMediaItems] = useState([]);
@@ -144,7 +145,7 @@ export const MediaLibrary = () => {
 
                   <div className="flex items-center gap-1">
                     <a
-                      href={item.url}
+                      href={sanitizeUrl(item.url)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="p-1 text-warm-muted hover:text-warm-charcoal rounded transition-colors"

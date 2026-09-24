@@ -4,6 +4,7 @@ import { Toast } from '../../components/ui/Toast';
 import { Modal } from '../../components/ui/Modal';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Image as ImageIcon, Plus, Trash2, ExternalLink } from 'lucide-react';
+import { sanitizeUrl } from '../../utils/sanitizeUrl';
 
 export const AdminMediaLibrary = () => {
   const [media, setMedia] = useState([]);
@@ -109,7 +110,7 @@ export const AdminMediaLibrary = () => {
               </div>
 
               <div className="p-3 pt-0 flex items-center justify-between border-t border-warm-border/40 mt-1">
-                <a href={item.url} target="_blank" rel="noopener noreferrer" className="p-1 text-warm-muted hover:text-warm-charcoal">
+                <a href={sanitizeUrl(item.url)} target="_blank" rel="noopener noreferrer" className="p-1 text-warm-muted hover:text-warm-charcoal">
                   <ExternalLink className="w-3.5 h-3.5" />
                 </a>
                 <button onClick={() => setDeleteId(item.id)} className="p-1 text-warm-muted hover:text-warm-terracotta">

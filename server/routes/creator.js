@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/db');
 const { authenticateToken, requireRole } = require('../middleware/auth');
-const { sanitizeObject } = require('../utils/sanitize');
+const { sanitizeObject, validateUrl } = require('../utils/sanitize');
 
 router.use(authenticateToken);
 router.use(requireRole('CREATOR'));
@@ -134,8 +134,9 @@ router.put('/profile', async (req, res) => {
   if (bio !== undefined && bio !== null && typeof bio !== 'string') {
     return res.status(400).json({ error: 'Bio must be a string.' });
   }
-  if (profile_image !== undefined && profile_image !== null && typeof profile_image !== 'string') {
-    return res.status(400).json({ error: 'Profile image must be a string.' });
+  if (profile_image !== undefined && profile_image !== null && profile_image !== '') {
+    const vUrl = validateUrl(profile_image, 'Profile image', 2048, false);
+    if (vUrl.error) return res.status(400).json({ error: vUrl.error });
   }
 
   try {
@@ -212,6 +213,15 @@ router.put('/website-settings', async (req, res) => {
     if (v.error) return res.status(400).json({ error: v.error });
   }
 
+  if (logo_url !== undefined && logo_url !== null && logo_url !== '') {
+    const vUrl = validateUrl(logo_url, 'Logo URL', 2048, false);
+    if (vUrl.error) return res.status(400).json({ error: vUrl.error });
+  }
+  if (favicon_url !== undefined && favicon_url !== null && favicon_url !== '') {
+    const vUrl = validateUrl(favicon_url, 'Favicon URL', 2048, false);
+    if (vUrl.error) return res.status(400).json({ error: vUrl.error });
+  }
+
   try {
     const updateRes = await db.query(
       `UPDATE website_settings
@@ -275,9 +285,13 @@ router.post('/sections', async (req, res) => {
     const v = validateString(button_text, 'Button text', 100, false);
     if (v.error) return res.status(400).json({ error: v.error });
   }
-  if (button_url !== undefined && button_url !== null) {
-    const v = validateString(button_url, 'Button URL', 255, false);
-    if (v.error) return res.status(400).json({ error: v.error });
+  if (button_url !== undefined && button_url !== null && button_url !== '') {
+    const vUrl = validateUrl(button_url, 'Button URL', 255, false);
+    if (vUrl.error) return res.status(400).json({ error: vUrl.error });
+  }
+  if (image_url !== undefined && image_url !== null && image_url !== '') {
+    const vUrl = validateUrl(image_url, 'Image URL', 2048, false);
+    if (vUrl.error) return res.status(400).json({ error: vUrl.error });
   }
 
   try {
@@ -323,9 +337,13 @@ router.put('/sections/:id', async (req, res) => {
     const v = validateString(button_text, 'Button text', 100, false);
     if (v.error) return res.status(400).json({ error: v.error });
   }
-  if (button_url !== undefined && button_url !== null) {
-    const v = validateString(button_url, 'Button URL', 255, false);
-    if (v.error) return res.status(400).json({ error: v.error });
+  if (button_url !== undefined && button_url !== null && button_url !== '') {
+    const vUrl = validateUrl(button_url, 'Button URL', 255, false);
+    if (vUrl.error) return res.status(400).json({ error: vUrl.error });
+  }
+  if (image_url !== undefined && image_url !== null && image_url !== '') {
+    const vUrl = validateUrl(image_url, 'Image URL', 2048, false);
+    if (vUrl.error) return res.status(400).json({ error: vUrl.error });
   }
 
   try {
@@ -415,6 +433,10 @@ router.post('/capabilities', async (req, res) => {
     const v = validateString(icon, 'Icon', 100, false);
     if (v.error) return res.status(400).json({ error: v.error });
   }
+  if (image_url !== undefined && image_url !== null && image_url !== '') {
+    const vUrl = validateUrl(image_url, 'Image URL', 2048, false);
+    if (vUrl.error) return res.status(400).json({ error: vUrl.error });
+  }
 
   try {
     const maxRes = await db.query(`SELECT COALESCE(MAX(sort_order), 0) as m FROM capabilities WHERE creator_id = $1`, [req.creator.id]);
@@ -449,6 +471,10 @@ router.put('/capabilities/:id', async (req, res) => {
   if (icon !== undefined && icon !== null) {
     const v = validateString(icon, 'Icon', 100, false);
     if (v.error) return res.status(400).json({ error: v.error });
+  }
+  if (image_url !== undefined && image_url !== null && image_url !== '') {
+    const vUrl = validateUrl(image_url, 'Image URL', 2048, false);
+    if (vUrl.error) return res.status(400).json({ error: vUrl.error });
   }
 
   try {
@@ -510,6 +536,11 @@ router.post('/posts', async (req, res) => {
   if (status !== undefined && status !== null) {
     const v = validateString(status, 'Status', 50, false);
     if (v.error) return res.status(400).json({ error: v.error });
+  }
+
+  if (featured_image !== undefined && featured_image !== null && featured_image !== '') {
+    const vUrl = validateUrl(featured_image, 'Featured image URL', 2048, false);
+    if (vUrl.error) return res.status(400).json({ error: vUrl.error });
   }
 
   const postSlug = slugify(slug || cleanTitle);
@@ -580,6 +611,11 @@ router.put('/posts/:id', async (req, res) => {
   if (status !== undefined && status !== null) {
     const v = validateString(status, 'Status', 50, false);
     if (v.error) return res.status(400).json({ error: v.error });
+  }
+
+  if (featured_image !== undefined && featured_image !== null && featured_image !== '') {
+    const vUrl = validateUrl(featured_image, 'Featured image URL', 2048, false);
+    if (vUrl.error) return res.status(400).json({ error: vUrl.error });
   }
 
   let validatedCategoryId = undefined;
@@ -779,6 +815,11 @@ router.post('/testimonials', async (req, res) => {
     cleanRating = vRating.value;
   }
 
+  if (avatar_url !== undefined && avatar_url !== null && avatar_url !== '') {
+    const vUrl = validateUrl(avatar_url, 'Avatar URL', 2048, false);
+    if (vUrl.error) return res.status(400).json({ error: vUrl.error });
+  }
+
   try {
     const newItem = await db.query(
       `INSERT INTO testimonials (creator_id, name, role, message, avatar_url, rating, is_visible)
@@ -820,6 +861,11 @@ router.put('/testimonials/:id', async (req, res) => {
     const vRating = validateInt(rating, 'Rating', 1, 5);
     if (vRating.error) return res.status(400).json({ error: vRating.error });
     cleanRating = vRating.value;
+  }
+
+  if (avatar_url !== undefined && avatar_url !== null && avatar_url !== '') {
+    const vUrl = validateUrl(avatar_url, 'Avatar URL', 2048, false);
+    if (vUrl.error) return res.status(400).json({ error: vUrl.error });
   }
 
   try {
@@ -945,13 +991,9 @@ router.get('/media', async (req, res) => {
 
 router.post('/media', async (req, res) => {
   const { url, title, alt_text, media_type } = req.body;
-  if (typeof url !== 'string' || !url.trim()) {
-    return res.status(400).json({ error: 'Media URL is required and must be a non-empty string.' });
-  }
-  const cleanUrl = url.trim();
-  if (cleanUrl.length > 2048) {
-    return res.status(400).json({ error: 'Media URL must be 2048 characters or fewer.' });
-  }
+  const vUrl = validateUrl(url, 'Media URL', 2048, true);
+  if (vUrl.error) return res.status(400).json({ error: vUrl.error });
+  const cleanUrl = vUrl.value;
 
   let cleanTitle = 'Untitled Media';
   if (title !== undefined && title !== null) {

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/db');
+const { sanitizeString } = require('../utils/sanitize');
 
 // Helper to look up active creator profile by username
 async function getActiveCreator(username) {
@@ -190,9 +191,9 @@ router.post('/site/:username/contact', async (req, res) => {
     return res.status(400).json({ error: 'Name, email, and message are required and must be non-empty strings.' });
   }
 
-  const cleanName = name.trim();
-  const cleanEmail = email.trim();
-  const cleanMessage = message.trim();
+  const cleanName = sanitizeString(name.trim());
+  const cleanEmail = sanitizeString(email.trim());
+  const cleanMessage = sanitizeString(message.trim());
 
   if (cleanName.length > 255 || cleanEmail.length > 255) {
     return res.status(400).json({ error: 'Name and email must each be 255 characters or fewer.' });
@@ -203,7 +204,7 @@ router.post('/site/:username/contact', async (req, res) => {
     if (typeof subject !== 'string') {
       return res.status(400).json({ error: 'Subject must be a string.' });
     }
-    const trimmedSubject = subject.trim();
+    const trimmedSubject = sanitizeString(subject.trim());
     if (trimmedSubject.length > 255) {
       return res.status(400).json({ error: 'Subject must be 255 characters or fewer.' });
     }

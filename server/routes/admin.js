@@ -2,9 +2,18 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/db');
 const { authenticateToken, requireRole } = require('../middleware/auth');
+const { sanitizeObject, validateUrl } = require('../utils/sanitize');
 
 router.use(authenticateToken);
 router.use(requireRole('ADMIN'));
+
+// Apply input sanitization middleware to all incoming admin write requests
+router.use((req, res, next) => {
+  if (['POST', 'PUT', 'PATCH'].includes(req.method) && req.body) {
+    req.body = sanitizeObject(req.body);
+  }
+  next();
+});
 
 // Validate route :id parameter format to prevent SQL syntax errors (22003, 22P02)
 router.param('id', (req, res, next, id) => {
@@ -237,6 +246,11 @@ router.put('/site/settings', async (req, res) => {
   const adminId = await getAdminCreatorId();
   const { site_title, site_description, logo_url, primary_color, secondary_color, accent_color } = req.body;
 
+  if (logo_url !== undefined && logo_url !== null && logo_url !== '') {
+    const vUrl = validateUrl(logo_url, 'Logo URL', 2048, false);
+    if (vUrl.error) return res.status(400).json({ error: vUrl.error });
+  }
+
   try {
     const updated = await db.query(
       `UPDATE website_settings
@@ -275,6 +289,29 @@ router.put('/site/navigation', async (req, res) => {
   const adminId = await getAdminCreatorId();
   const { footer_text, copyright_text, social_links } = req.body;
 
+  let cleanSocialLinks = social_links;
+  if (social_links !== undefined && social_links !== null) {
+    let linksObj = social_links;
+    if (typeof linksObj === 'string') {
+      try {
+        linksObj = JSON.parse(linksObj);
+      } catch {
+        return res.status(400).json({ error: 'Invalid social links JSON format.' });
+      }
+    }
+    if (typeof linksObj === 'object' && linksObj !== null && !Array.isArray(linksObj)) {
+      for (const [platform, link] of Object.entries(linksObj)) {
+        if (link !== undefined && link !== null && link !== '') {
+          const vUrl = validateUrl(link, `${platform} URL`, 2048, false);
+          if (vUrl.error) return res.status(400).json({ error: vUrl.error });
+        }
+      }
+      cleanSocialLinks = linksObj;
+    } else if (linksObj !== '') {
+      return res.status(400).json({ error: 'Social links must be an object.' });
+    }
+  }
+
   try {
     const updated = await db.query(
       `UPDATE navigation_settings
@@ -284,7 +321,7 @@ router.put('/site/navigation', async (req, res) => {
            updated_at = CURRENT_TIMESTAMP
        WHERE creator_id = $4
        RETURNING *`,
-      [footer_text, copyright_text, typeof social_links === 'object' ? JSON.stringify(social_links) : social_links, adminId]
+      [footer_text, copyright_text, typeof cleanSocialLinks === 'object' ? JSON.stringify(cleanSocialLinks) : cleanSocialLinks, adminId]
     );
 
     await logActivity(req.user.id, req.user.name, 'Updated Navigation & Footer Settings', 'Platform Website Navigation');
@@ -310,14 +347,9 @@ router.post('/media', async (req, res) => {
   const adminId = await getAdminCreatorId();
   const { url, title, alt_text, media_type } = req.body;
 
-  if (typeof url !== 'string' || !url.trim()) {
-    return res.status(400).json({ error: 'Media URL is required and must be a non-empty string.' });
-  }
-
-  const cleanUrl = url.trim();
-  if (cleanUrl.length > 2048) {
-    return res.status(400).json({ error: 'Media URL must be 2048 characters or fewer.' });
-  }
+  const vUrl = validateUrl(url, 'Media URL', 2048, true);
+  if (vUrl.error) return res.status(400).json({ error: vUrl.error });
+  const cleanUrl = vUrl.value;
 
   let cleanTitle = 'Platform Media';
   if (title !== undefined && title !== null) {

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import axios from 'axios';
+import { sanitizeUrl } from '../../utils/sanitizeUrl';
 import {
   Sparkles,
   ArrowRight,
@@ -293,7 +294,7 @@ export const PublicCreatorSite = () => {
                       {sec.button_text && (
                         <div>
                           <a
-                            href={sec.button_url || '#contact'}
+                            href={sanitizeUrl(sec.button_url, '#contact')}
                             className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-white font-semibold shadow-md transition-all hover:scale-105"
                             style={{ backgroundColor: accentColor }}
                           >
@@ -338,7 +339,7 @@ export const PublicCreatorSite = () => {
                       <p className="text-base opacity-85 leading-relaxed whitespace-pre-line">{sec.body}</p>
                       {sec.button_text && (
                         <a
-                          href={sec.button_url || '#contact'}
+                          href={sanitizeUrl(sec.button_url, '#contact')}
                           className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-white text-xs font-semibold shadow-sm hover:opacity-90 transition-opacity"
                           style={{ backgroundColor: primaryColor }}
                         >
@@ -366,7 +367,7 @@ export const PublicCreatorSite = () => {
                     {sec.button_text && (
                       <div>
                         <a
-                          href={sec.button_url || '#contact'}
+                          href={sanitizeUrl(sec.button_url, '#contact')}
                           className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-bold shadow-md hover:opacity-90 transition-all"
                           style={{ backgroundColor: surfaceColor, color: primaryColor }}
                         >
