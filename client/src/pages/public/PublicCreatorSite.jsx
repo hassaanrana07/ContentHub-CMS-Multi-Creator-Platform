@@ -310,6 +310,7 @@ export const PublicCreatorSite = () => {
                         <img
                           src={sec.image_url}
                           alt={sec.title}
+                          decoding="async"
                           className="w-full h-[400px] object-cover rounded-2xl shadow-xl border border-warm-border"
                         />
                       </div>
@@ -326,6 +327,8 @@ export const PublicCreatorSite = () => {
                       <img
                         src={sec.image_url}
                         alt={sec.title}
+                        loading="lazy"
+                        decoding="async"
                         className="w-full h-80 md:h-[420px] object-cover rounded-2xl border border-warm-border shadow-md"
                       />
                     )}
@@ -433,6 +436,8 @@ export const PublicCreatorSite = () => {
                     <img
                       src={capabilities[capabilityIndex].image_url}
                       alt={capabilities[capabilityIndex].title}
+                      loading="lazy"
+                      decoding="async"
                       className="w-full h-56 md:h-64 object-cover rounded-2xl border border-warm-border shadow-md"
                     />
                   ) : (
@@ -515,7 +520,13 @@ export const PublicCreatorSite = () => {
                   <article key={post.id} className="border border-warm-border rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between" style={{ backgroundColor: surfaceColor }}>
                     <div className="space-y-4 p-6">
                       {post.featured_image && (
-                        <img src={post.featured_image} alt={post.title} className="w-full h-44 object-cover rounded-xl border border-warm-border" />
+                        <img
+                          src={post.featured_image}
+                          alt={post.title}
+                          loading="lazy"
+                          decoding="async"
+                          className="w-full h-44 object-cover rounded-xl border border-warm-border"
+                        />
                       )}
                       <div className="space-y-2">
                         <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold border border-warm-border" style={{ backgroundColor: bgColor }}>
@@ -580,6 +591,8 @@ export const PublicCreatorSite = () => {
                         <img
                           src={testimonials[testimonialIndex].avatar_url}
                           alt={testimonials[testimonialIndex].name}
+                          loading="lazy"
+                          decoding="async"
                           className="w-12 h-12 rounded-full object-cover border-2 border-warm-border shadow-sm"
                         />
                       ) : (

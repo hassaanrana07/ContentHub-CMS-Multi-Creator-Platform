@@ -7,6 +7,7 @@
     "server": "npm run start --prefix server",
     "client": "npm run dev --prefix client",
     "db:seed": "node server/db/seed.js",
-    "build": "npm run build --prefix client"
+    "build": "npm run build --prefix client",
+    "test": "node --test server/tests/*.test.js"
   }
 }

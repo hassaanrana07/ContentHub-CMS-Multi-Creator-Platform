@@ -99,7 +99,13 @@ export const PublicArticleList = () => {
               <article key={post.id} className="bg-warm-surface border border-warm-border rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between">
                 <div className="space-y-4 p-6">
                   {post.featured_image && (
-                    <img src={post.featured_image} alt={post.title} className="w-full h-44 object-cover rounded-xl border border-warm-border" />
+                    <img
+                      src={post.featured_image}
+                      alt={post.title}
+                      loading="lazy"
+                      decoding="async"
+                      className="w-full h-44 object-cover rounded-xl border border-warm-border"
+                    />
                   )}
                   <div className="space-y-2">
                     <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-warm-bg border border-warm-border text-warm-brown">
