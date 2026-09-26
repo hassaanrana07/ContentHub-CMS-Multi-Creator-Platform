@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { Sparkles, ArrowRight, Lock, UserCheck, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { ArrowRight, Lock, UserCheck, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 export const Login = () => {
   const { login } = useAuth();
@@ -34,10 +34,6 @@ export const Login = () => {
     }
   };
 
-  const handleQuickLogin = (quickId, quickPass) => {
-    setIdentifier(quickId);
-    setPassword(quickPass);
-  };
 
   return (
     <div className="min-h-screen bg-warm-bg flex items-center justify-center p-4 font-sans">
@@ -110,45 +106,6 @@ export const Login = () => {
             <ArrowRight className="w-4 h-4" />
           </button>
         </form>
-
-        {/* Quick Demo Credentials Assistant (Dev Only) */}
-        {import.meta.env.DEV && (
-          <div className="pt-4 border-t border-warm-border space-y-3">
-            <p className="text-xs font-mono uppercase tracking-wider text-warm-gold text-center">
-              Demo Accounts (Click to Fill)
-            </p>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('admin@contenthub.com', 'Admin123!')}
-                className="px-2.5 py-1.5 rounded bg-warm-bg hover:bg-warm-hover border border-warm-border text-warm-charcoal font-medium text-left truncate"
-              >
-                👑 Super Admin
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('hassan', 'Creator123!')}
-                className="px-2.5 py-1.5 rounded bg-warm-bg hover:bg-warm-hover border border-warm-border text-warm-charcoal font-medium text-left truncate"
-              >
-                🎨 Creator: hassan
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('sarah', 'Creator123!')}
-                className="px-2.5 py-1.5 rounded bg-warm-bg hover:bg-warm-hover border border-warm-border text-warm-charcoal font-medium text-left truncate"
-              >
-                🎨 Creator: sarah
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('ali', 'Creator123!')}
-                className="px-2.5 py-1.5 rounded bg-warm-bg hover:bg-warm-hover border border-warm-border text-warm-charcoal font-medium text-left truncate"
-              >
-                🎨 Creator: ali
-              </button>
-            </div>
-          </div>
-        )}
 
         {/* Footer link to register */}
         <div className="text-center text-xs text-warm-muted">
