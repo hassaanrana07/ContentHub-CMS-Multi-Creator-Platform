@@ -50,8 +50,13 @@ if (cleanupInterval.unref) {
 }
 
 const authenticateToken = async (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  let token = null;
+
+  if (req.cookies && req.cookies.contenthub_token) {
+    token = req.cookies.contenthub_token;
+  } else if (req.headers['authorization'] && req.headers['authorization'].startsWith('Bearer ')) {
+    token = req.headers['authorization'].split(' ')[1];
+  }
 
   if (!token) {
     return res.status(401).json({ error: 'Authentication required. No token provided.' });
@@ -83,8 +88,8 @@ const authenticateToken = async (req, res, next) => {
 
     const row = userRes.rows[0];
 
-    if (row.status === 'SUSPENDED') {
-      return res.status(403).json({ error: 'Your account has been suspended. Please contact platform support.' });
+    if (row.status !== 'ACTIVE') {
+      return res.status(403).json({ error: 'Your account is not active. Please contact platform support.' });
     }
 
     req.user = {
@@ -119,6 +124,9 @@ const requireRole = (role) => {
     }
     if (req.user.role !== role) {
       return res.status(403).json({ error: `Access denied. Requires ${role} role privileges.` });
+    }
+    if (role === 'CREATOR' && (!req.creator || !req.creator.id)) {
+      return res.status(403).json({ error: 'Access denied. Creator profile not initialized.' });
     }
     next();
   };

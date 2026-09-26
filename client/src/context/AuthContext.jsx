@@ -1,26 +1,24 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
 
+// Ensure all cross-origin and same-origin Axios requests include HttpOnly cookies
+axios.defaults.withCredentials = true;
+
 const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [creator, setCreator] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem('contenthub_token') || null);
   const [loading, setLoading] = useState(true);
 
-  // Set default axios Authorization header whenever token changes
+  // Initial session verification on application mount
   useEffect(() => {
-    if (token) {
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      fetchCurrentUser();
-    } else {
-      delete axios.defaults.headers.common['Authorization'];
-      setUser(null);
-      setCreator(null);
-      setLoading(false);
+    // Migration safeguard: remove any legacy token from localStorage
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.removeItem('contenthub_token');
     }
-  }, [token]);
+    fetchCurrentUser();
+  }, []);
 
   const fetchCurrentUser = async () => {
     try {
@@ -29,18 +27,21 @@ export const AuthProvider = ({ children }) => {
       setUser(res.data.user);
       setCreator(res.data.creator);
     } catch (err) {
-      console.error('Failed to verify session token:', err.response?.data?.error || err.message);
-      logout();
+      setUser(null);
+      setCreator(null);
     } finally {
       setLoading(false);
     }
   };
 
   const login = async (identifier, password) => {
-    const res = await axios.post('/api/auth/login', { identifier, password, email: identifier, username: identifier });
-    const { token: jwtToken, user: userData, creator: creatorData } = res.data;
-    localStorage.setItem('contenthub_token', jwtToken);
-    setToken(jwtToken);
+    const res = await axios.post('/api/auth/login', {
+      identifier,
+      password,
+      email: identifier,
+      username: identifier
+    });
+    const { user: userData, creator: creatorData } = res.data;
     setUser(userData);
     setCreator(creatorData);
     return res.data;
@@ -53,28 +54,33 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async () => {
-    const activeToken = token || localStorage.getItem('contenthub_token');
     try {
-      if (activeToken) {
-        // Attempt server-side token revocation (with 4s timeout against network hang)
-        await axios.post('/api/auth/logout', null, {
-          headers: { Authorization: `Bearer ${activeToken}` },
-          timeout: 4000
-        });
-      }
+      // Server-side logout revokes JWT in blocklist and clears the HttpOnly cookie
+      await axios.post('/api/auth/logout', null, { timeout: 4000 });
     } catch (err) {
-      console.warn('Server logout revocation notice (proceeding with local logout):', err?.response?.data?.error || err?.message);
+      console.warn('Server logout revocation notice:', err?.response?.data?.error || err?.message);
     } finally {
-      localStorage.removeItem('contenthub_token');
-      delete axios.defaults.headers.common['Authorization'];
-      setToken(null);
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.removeItem('contenthub_token');
+      }
       setUser(null);
       setCreator(null);
     }
   };
 
   return (
-    <AuthContext.Provider value={{ user, creator, token, loading, login, register, logout, fetchCurrentUser }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        creator,
+        token: !!user,
+        loading,
+        login,
+        register,
+        logout,
+        fetchCurrentUser
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

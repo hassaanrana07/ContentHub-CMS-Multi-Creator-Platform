@@ -85,4 +85,106 @@ describe('Role-Based Access Control (RBAC) & IDOR / BOLA Tests', () => {
     });
     assert.strictEqual(res.status, 403);
   });
+
+  it('should block unauthenticated access to creator endpoints with HTTP 401', async () => {
+    const res = await fetch(`${BASE_URL}/api/creator/profile`);
+    assert.strictEqual(res.status, 401);
+  });
+
+  it('should block Admin from suspending any platform administrator account with HTTP 403', async () => {
+    // Creator profile 1 belongs to user 1 (ADMIN)
+    const res = await fetch(`${BASE_URL}/api/admin/creators/1/status`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ status: 'SUSPENDED' })
+    });
+    assert.strictEqual(res.status, 403);
+  });
+
+  it('should block BOLA / IDOR: Creator A attempting to modify Creator B category returns HTTP 404', async () => {
+    // Creator B (sarah) category ID is 3
+    const res = await fetch(`${BASE_URL}/api/creator/categories/3`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${creatorAToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ name: 'Hacked Category' })
+    });
+    assert.strictEqual(res.status, 404);
+  });
+
+  it('should block BOLA / IDOR: Creator A attempting to delete Creator B category returns HTTP 404', async () => {
+    const res = await fetch(`${BASE_URL}/api/creator/categories/3`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${creatorAToken}` }
+    });
+    assert.strictEqual(res.status, 404);
+  });
+
+  it('should block BOLA / IDOR: Creator A attempting to mark Creator B message as read returns HTTP 404', async () => {
+    // Message ID 3 belongs to Creator B (sarah)
+    const res = await fetch(`${BASE_URL}/api/creator/messages/3/read`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${creatorAToken}` }
+    });
+    assert.strictEqual(res.status, 404);
+  });
+
+  it('should block BOLA / IDOR: Creator A attempting to delete Creator B message returns HTTP 404', async () => {
+    const res = await fetch(`${BASE_URL}/api/creator/messages/3`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${creatorAToken}` }
+    });
+    assert.strictEqual(res.status, 404);
+  });
+
+  it('should block BOLA / IDOR: Creator A attempting to delete Creator B testimonial returns HTTP 404', async () => {
+    // Testimonial ID 2 belongs to Creator B (sarah)
+    const res = await fetch(`${BASE_URL}/api/creator/testimonials/2`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${creatorAToken}` }
+    });
+    assert.strictEqual(res.status, 404);
+  });
+
+  it('should block BOLA / IDOR: Creator A attempting to reorder with foreign section ID returns HTTP 404', async () => {
+    // Section ID 7 belongs to Creator B (sarah)
+    const res = await fetch(`${BASE_URL}/api/creator/sections/reorder`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${creatorAToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ sectionIds: [1, 7] })
+    });
+    assert.strictEqual(res.status, 404);
+  });
+
+  it('should ignore client-supplied creator_id and bind authenticated creator on post creation', async () => {
+    const res = await fetch(`${BASE_URL}/api/creator/posts`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${creatorAToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        title: 'IDOR Tamper Test Article',
+        content: 'Testing creator_id override',
+        creator_id: 3 // Attempt to inject Creator B's ID
+      })
+    });
+    assert.strictEqual(res.status, 201);
+    const data = await res.json();
+    assert.strictEqual(data.post.creator_id, 2, 'Must bind authenticated creator ID (2), ignoring client input (3)');
+
+    // Cleanup created test post
+    await fetch(`${BASE_URL}/api/creator/posts/${data.post.id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${creatorAToken}` }
+    });
+  });
 });

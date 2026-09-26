@@ -23,6 +23,7 @@ if (!JWT_SECRET || INSECURE_JWT_SECRETS.includes(JWT_SECRET) || JWT_SECRET.trim(
   process.exit(1);
 }
 
+const cookieParser = require('cookie-parser');
 const authRoutes = require('./routes/auth');
 const creatorRoutes = require('./routes/creator');
 const publicRoutes = require('./routes/public');
@@ -41,13 +42,20 @@ app.use(
 );
 
 // Production-ready CORS configuration
-const allowedOrigins = process.env.CLIENT_URL
-  ? [process.env.CLIENT_URL, 'http://localhost:5173', 'http://localhost:5090']
-  : '*';
+const allowedOrigins = ['http://localhost:5173', 'http://localhost:5090'];
+if (process.env.CLIENT_URL && !allowedOrigins.includes(process.env.CLIENT_URL)) {
+  allowedOrigins.push(process.env.CLIENT_URL);
+}
 
 app.use(
   cors({
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps, curl, server-to-server)
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(null, false);
+    },
     credentials: true,
   })
 );
@@ -59,58 +67,47 @@ if (process.env.TRUST_PROXY) {
 
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
+app.use(cookieParser());
 
-// 1. General API abuse guard against volumetric flooding
-const apiRateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000, // Limit each IP to 1000 API requests per 15 minutes
-  message: { error: 'Too many requests to the platform API. Please slow down.' },
-  standardHeaders: true,
-  legacyHeaders: false,
+// CSRF Defense-in-depth: For state-mutating requests utilizing cookie authentication, verify origin
+app.use((req, res, next) => {
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+    if (req.cookies && req.cookies.contenthub_token) {
+      const origin = req.headers['origin'] || req.headers['referer'];
+      if (origin) {
+        try {
+          const originHost = new URL(origin).origin;
+          if (!allowedOrigins.includes(originHost)) {
+            return res.status(403).json({ error: 'Forbidden: Cross-site request rejected.' });
+          }
+        } catch (e) {
+          return res.status(403).json({ error: 'Forbidden: Invalid request origin.' });
+        }
+      }
+    }
+  }
+  next();
 });
 
-// 2. Authentication Login Rate Limiter (Brute-force protection)
-const loginRateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 30, // Limit each IP to 30 failed login attempts per window
-  message: { error: 'Too many authentication attempts. Please try again after 15 minutes.' },
-  standardHeaders: true,
-  legacyHeaders: false,
-  skipSuccessfulRequests: true, // Do not penalize successful authentications
-});
+// Centralized Rate Limiters
+const {
+  resetRateLimits,
+  apiRateLimiter,
+  loginIpRateLimiter,
+  loginAccountRateLimiter,
+  registerRateLimiter,
+  publicSiteRateLimiter,
+  passwordResetRateLimiter,
+  emailVerificationRateLimiter
+} = require('./middleware/rateLimiters');
 
-// 3. Dedicated Registration Rate Limiter (Anti-account spam)
-const registerRateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 20, // Limit each IP to 20 account registrations per window
-  message: { error: 'Too many account registration attempts. Please try again later.' },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-// 4. Public Contact Form Rate Limiter (Spam protection)
-const contactRateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 20, // Limit each IP to 20 contact messages per window
-  message: { error: 'Too many contact messages submitted. Please try again later.' },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-// 5. Public Site Read Rate Limiter (Prevents connection pool exhaustion on heavy multi-query reads)
-const publicSiteRateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 250, // Limit each IP to 250 public portfolio/article queries per 15 minutes
-  message: { error: 'Too many requests to creator website. Please slow down.' },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-// Apply Rate Limiters
+// Apply Rate Limiters before expensive authentication and database operations
 app.use('/api', apiRateLimiter);
-app.use('/api/auth/login', loginRateLimiter);
+app.use('/api/auth/login', loginIpRateLimiter, loginAccountRateLimiter);
 app.use('/api/auth/register', registerRateLimiter);
-app.use('/api/public/site/:username/contact', contactRateLimiter);
+app.use('/api/auth/forgot-password', passwordResetRateLimiter);
+app.use('/api/auth/reset-password', passwordResetRateLimiter);
+app.use('/api/auth/verify-email', emailVerificationRateLimiter);
 app.use('/api/public/site', (req, res, next) => {
   if (req.method === 'GET') {
     return publicSiteRateLimiter(req, res, next);
@@ -133,6 +130,14 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
+
+// Test/Development Helper: Programmatic reset of rate limit stores for automated test suites
+if (!isProduction) {
+  app.post('/api/test/reset-rate-limits', async (req, res) => {
+    await resetRateLimits();
+    res.json({ message: 'Rate limit stores successfully reset.' });
+  });
+}
 
 // Serve Client Build Assets in Unified Production Mode
 const clientDistPath = path.join(__dirname, '../client/dist');

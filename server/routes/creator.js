@@ -401,6 +401,19 @@ router.patch('/sections/reorder', async (req, res) => {
   const client = await db.pool.connect();
   try {
     await client.query('BEGIN');
+
+    // BOLA/IDOR safeguard: Ensure all submitted section IDs belong to the authenticated creator
+    if (validIds.length > 0) {
+      const ownershipCheck = await client.query(
+        `SELECT COUNT(*) FROM homepage_sections WHERE id = ANY($1::int[]) AND creator_id = $2`,
+        [validIds, req.creator.id]
+      );
+      if (parseInt(ownershipCheck.rows[0].count, 10) !== validIds.length) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'One or more sections not found or unauthorized.' });
+      }
+    }
+
     for (let index = 0; index < validIds.length; index++) {
       await client.query(`UPDATE homepage_sections SET sort_order = $1 WHERE id = $2 AND creator_id = $3`, [index + 1, validIds[index], req.creator.id]);
     }

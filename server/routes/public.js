@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/db');
 const { sanitizeString } = require('../utils/sanitize');
+const { contactRateLimiter } = require('../middleware/rateLimiters');
 
 // Helper to look up active creator profile by username
 async function getActiveCreator(username) {
@@ -179,7 +180,7 @@ router.get('/site/:username/posts/:slug', async (req, res) => {
 });
 
 // 5. Submit Contact Form (Directly to :username's or Admin's inbox)
-router.post('/site/:username/contact', async (req, res) => {
+router.post('/site/:username/contact', contactRateLimiter, async (req, res) => {
   const { username } = req.params;
   const { name, email, subject, message } = req.body;
 

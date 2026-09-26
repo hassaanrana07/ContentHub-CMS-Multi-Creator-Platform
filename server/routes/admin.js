@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/db');
 const { authenticateToken, requireRole } = require('../middleware/auth');
+const { adminActionRateLimiter } = require('../middleware/rateLimiters');
 const { sanitizeObject, validateUrl } = require('../utils/sanitize');
 
 router.use(authenticateToken);
@@ -170,7 +171,7 @@ router.get('/creators', async (req, res) => {
   }
 });
 
-router.patch('/creators/:id/status', async (req, res) => {
+router.patch('/creators/:id/status', adminActionRateLimiter, async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
@@ -189,6 +190,12 @@ router.patch('/creators/:id/status', async (req, res) => {
       return res.status(403).json({ error: 'Administrative action forbidden: You cannot alter the suspension status of your own account.' });
     }
 
+    // Safeguard: Prevent suspending any platform administrator accounts through creator management
+    const userRoleCheck = await db.query(`SELECT role FROM users WHERE id = $1`, [creatorObj.user_id]);
+    if (userRoleCheck.rowCount > 0 && userRoleCheck.rows[0].role === 'ADMIN') {
+      return res.status(403).json({ error: 'Administrative action forbidden: Platform administrator accounts cannot be suspended through this endpoint.' });
+    }
+
     const updateRes = await db.query(
       `UPDATE users SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING id, status`,
       [status, creatorObj.user_id]
@@ -202,7 +209,7 @@ router.patch('/creators/:id/status', async (req, res) => {
   }
 });
 
-router.delete('/creators/:id', async (req, res) => {
+router.delete('/creators/:id', adminActionRateLimiter, async (req, res) => {
   const { id } = req.params;
   try {
     const creatorRes = await db.query(`SELECT user_id, display_name FROM creator_profiles WHERE id = $1`, [id]);
@@ -473,7 +480,7 @@ router.get('/content', async (req, res) => {
   }
 });
 
-router.delete('/content/posts/:id', async (req, res) => {
+router.delete('/content/posts/:id', adminActionRateLimiter, async (req, res) => {
   const { id } = req.params;
   try {
     const postRes = await db.query(`SELECT title FROM posts WHERE id = $1`, [id]);
@@ -538,7 +545,7 @@ router.post('/categories', async (req, res) => {
   }
 });
 
-router.delete('/categories/:id', async (req, res) => {
+router.delete('/categories/:id', adminActionRateLimiter, async (req, res) => {
   const { id } = req.params;
   try {
     const delRes = await db.query(`DELETE FROM categories WHERE id = $1 RETURNING id`, [id]);

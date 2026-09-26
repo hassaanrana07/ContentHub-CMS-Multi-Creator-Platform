@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { User, Mail, Lock, UserCheck, ArrowRight, AlertCircle } from 'lucide-react';
+import { User, Mail, Lock, UserCheck, ArrowRight, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { validatePasswordClient, getPasswordStrength } from '../../utils/passwordValidation';
 
 export const Register = () => {
   const { register } = useAuth();
@@ -25,8 +26,13 @@ export const Register = () => {
     e.preventDefault();
     setError('');
 
-    if (formData.password !== formData.confirmPassword) {
-      setError('Passwords do not match.');
+    const validation = validatePasswordClient(formData.password, formData.confirmPassword, {
+      username: formData.username,
+      email: formData.email
+    });
+
+    if (!validation.isValid) {
+      setError(validation.error);
       return;
     }
 
@@ -161,6 +167,34 @@ export const Register = () => {
               </div>
             </div>
           </div>
+
+          {/* Password Strength Meter & Policy Guidance */}
+          {formData.password && (
+            <div className="space-y-1.5 p-3 rounded-lg bg-warm-bg border border-warm-border/60 text-xs">
+              <div className="flex items-center justify-between text-warm-muted">
+                <span>Password Strength:</span>
+                <span className="font-semibold text-warm-charcoal">
+                  {getPasswordStrength(formData.password).label}
+                </span>
+              </div>
+              <div className="grid grid-cols-4 gap-1.5 h-1.5">
+                {[1, 2, 3, 4].map((step) => {
+                  const strength = getPasswordStrength(formData.password);
+                  return (
+                    <div
+                      key={step}
+                      className={`h-full rounded-full transition-all ${
+                        step <= strength.score ? strength.color : 'bg-warm-border'
+                      }`}
+                    />
+                  );
+                })}
+              </div>
+              <p className="text-[11px] text-warm-muted leading-tight pt-1">
+                Must be at least 8 characters with a mix of letters and numbers/symbols (or a 14+ character passphrase). Breached passwords are blocked.
+              </p>
+            </div>
+          )}
 
           <button
             type="submit"

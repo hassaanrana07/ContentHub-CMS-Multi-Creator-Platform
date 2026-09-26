@@ -1,5 +1,6 @@
 -- ContentHub CMS PostgreSQL Schema
 
+DROP TABLE IF EXISTS password_reset_tokens CASCADE;
 DROP TABLE IF EXISTS activity_logs CASCADE;
 DROP TABLE IF EXISTS navigation_settings CASCADE;
 DROP TABLE IF EXISTS contact_messages CASCADE;
@@ -203,6 +204,16 @@ CREATE TABLE activity_logs (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Password Reset Tokens Table (Expiring, Single-Use, SHA-256 Hashed)
+CREATE TABLE password_reset_tokens (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash VARCHAR(64) NOT NULL,
+  expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  used_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Database Indexes
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_creator_profiles_username ON creator_profiles(username);
@@ -215,3 +226,6 @@ CREATE INDEX idx_faqs_creator ON faqs(creator_id, sort_order);
 CREATE INDEX idx_media_creator ON media(creator_id);
 CREATE INDEX idx_contact_messages_creator ON contact_messages(creator_id, is_read);
 CREATE INDEX idx_activity_logs_created ON activity_logs(created_at DESC);
+CREATE INDEX idx_password_reset_token_hash ON password_reset_tokens(token_hash);
+CREATE INDEX idx_password_reset_user_id ON password_reset_tokens(user_id);
+

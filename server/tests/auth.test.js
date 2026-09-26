@@ -127,4 +127,92 @@ describe('Authentication & Session Management Tests', () => {
     });
     assert.strictEqual(meRes.status, 401);
   });
+
+  it('should set HttpOnly, SameSite=Lax cookie on login', async () => {
+    const res = await fetch(`${BASE_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: 'admin@contenthub.com', password: 'Admin123!' })
+    });
+    assert.strictEqual(res.status, 200);
+    const setCookie = res.headers.get('set-cookie');
+    assert.ok(setCookie, 'Set-Cookie header must be present');
+    assert.ok(setCookie.includes('contenthub_token='), 'Cookie must contain contenthub_token');
+    assert.ok(setCookie.toLowerCase().includes('httponly'), 'Cookie must be HttpOnly');
+    assert.ok(setCookie.toLowerCase().includes('samesite=lax'), 'Cookie must have SameSite=Lax');
+  });
+
+  it('should authenticate via contenthub_token cookie on /api/auth/me', async () => {
+    // 1. Login to obtain cookie
+    const loginRes = await fetch(`${BASE_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: 'admin@contenthub.com', password: 'Admin123!' })
+    });
+    const setCookie = loginRes.headers.get('set-cookie');
+    const cookieMatch = setCookie.match(/contenthub_token=([^;]+)/);
+    assert.ok(cookieMatch, 'Must extract contenthub_token value');
+    const cookieVal = cookieMatch[0];
+
+    // 2. Access /api/auth/me with Cookie header (NO Authorization header)
+    const meRes = await fetch(`${BASE_URL}/api/auth/me`, {
+      headers: { Cookie: cookieVal }
+    });
+    assert.strictEqual(meRes.status, 200);
+    const meData = await meRes.json();
+    assert.strictEqual(meData.user.email, 'admin@contenthub.com');
+  });
+
+  it('should clear cookie and revoke token on cookie-based logout', async () => {
+    // 1. Login to obtain cookie
+    const loginRes = await fetch(`${BASE_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: 'hassan@example.com', password: 'Creator123!' })
+    });
+    const setCookie = loginRes.headers.get('set-cookie');
+    const cookieMatch = setCookie.match(/contenthub_token=([^;]+)/);
+    const cookieVal = cookieMatch[0];
+
+    // 2. Logout using Cookie
+    const logoutRes = await fetch(`${BASE_URL}/api/auth/logout`, {
+      method: 'POST',
+      headers: {
+        Cookie: cookieVal,
+        Origin: 'http://localhost:5173'
+      }
+    });
+    assert.strictEqual(logoutRes.status, 200);
+    const logoutSetCookie = logoutRes.headers.get('set-cookie');
+    assert.ok(logoutSetCookie, 'Set-Cookie header must be present on logout');
+    assert.ok(logoutSetCookie.includes('contenthub_token=;') || logoutSetCookie.includes('Max-Age=0') || logoutSetCookie.includes('Expires='), 'Cookie must be cleared');
+
+    // 3. Try to reuse the cookie on /api/auth/me
+    const meRes = await fetch(`${BASE_URL}/api/auth/me`, {
+      headers: { Cookie: cookieVal }
+    });
+    assert.strictEqual(meRes.status, 401);
+  });
+
+  it('should reject state-modifying requests with unauthorized origin when using cookie (CSRF protection)', async () => {
+    // 1. Login to obtain cookie
+    const loginRes = await fetch(`${BASE_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: 'admin@contenthub.com', password: 'Admin123!' })
+    });
+    const setCookie = loginRes.headers.get('set-cookie');
+    const cookieMatch = setCookie.match(/contenthub_token=([^;]+)/);
+    const cookieVal = cookieMatch[0];
+
+    // 2. Attempt POST request with unauthorized Origin
+    const evilRes = await fetch(`${BASE_URL}/api/auth/logout`, {
+      method: 'POST',
+      headers: {
+        Cookie: cookieVal,
+        Origin: 'http://malicious-site.com'
+      }
+    });
+    assert.strictEqual(evilRes.status, 403);
+  });
 });

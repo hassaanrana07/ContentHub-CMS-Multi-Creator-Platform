@@ -56,7 +56,7 @@ const PageLoader = () => (
 
 // Protected Route Wrapper
 const ProtectedRoute = ({ children, allowedRole }) => {
-  const { user, token, loading } = useAuth();
+  const { user, loading } = useAuth();
 
   if (loading) {
     return (
@@ -66,7 +66,7 @@ const ProtectedRoute = ({ children, allowedRole }) => {
     );
   }
 
-  if (!token || !user) {
+  if (!user) {
     return <Navigate to="/login" replace />;
   }
 
